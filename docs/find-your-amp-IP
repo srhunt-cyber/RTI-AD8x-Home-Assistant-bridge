@@ -1,0 +1,49 @@
+Finding Your Amp's IP Address
+An important quirk to be aware of is that the RTI AD-8x amplifiers do not correctly register a hostname with most DHCP servers. When you look at your router's list of connected devices, you'll likely see the amp's IP address, but the device name will be blank, listed as "unknown," or shown only as a MAC address.
+
+This makes it impossible to connect to the amp by a friendly name (like rti-amp.local). You must find its IP address manually to configure the bridge.
+
+Solution for Linux 🐧
+The most effective way to find the amp on a Linux system is to use nmap to scan your network and then filter the results by RTI's unique hardware identifier.
+
+1. Install nmap
+
+If you don't have it installed, open your terminal and run:
+
+Bash
+sudo apt update && sudo apt install nmap
+2. Scan the Network
+
+Run the following command, making sure to change 192.168.1.0/24 to match your network's IP range if it's different.
+
+Bash
+nmap -sn 192.168.1.0/24 | grep -B 2 "00:14:73"
+nmap -sn: This performs a fast "ping scan" to find all online devices.
+
+grep -B 2 "00:14:73": This searches the results for the MAC address prefix 00:14:73, which is unique to RTI hardware, and shows the IP address associated with it.
+
+3. Read the Output
+
+The output will clearly show you the IP address for your amp:
+
+Nmap scan report for 192.168.1.182
+Host is up (0.0021s latency).
+MAC Address: 00:14:73:XX:XX:XX (Remote Technologies)
+In this example, the amp's IP address is 192.168.1.182.
+
+4. Verify with the Web UI
+
+You can confirm you've found the correct device by navigating to its IP address in a web browser.
+
+URL: http://YOUR_AMP_IP (e.g., http://192.168.1.182)
+
+Username: admin
+
+Password: RTI
+
+This web interface is useful for verification and basic configuration. Note that the Telnet connection (port 23) used by the bridge does not require authentication.
+
+5. Set a Static IP (Recommended)
+
+Once you have confirmed the IP, it is highly recommended that you set a static IP for the amp or a DHCP reservation in your router's settings. This will ensure the IP address never changes, providing a stable connection for the bridge.
+
