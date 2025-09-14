@@ -1,46 +1,15 @@
 button_card_templates:
-  rti_all_off_both:
-    variables:
-      label: All Zones Off — Both Amps
-      entities: []
-    show_icon: true
-    icon: mdi:power
-    name: '[[[ return variables.label ]]]'
-    custom_fields:
-      sub: |
-        [[[
-          const list = variables.entities || [];
-          const onCount = list.filter(e => states[e]?.state === 'on').length;
-          return onCount > 0 ? `${onCount} on` : 'all off';
-        ]]]
-    styles:
-      grid:
-        - grid-template-areas: '"i n" "i sub"'
-        - grid-template-columns: 36px 1fr
-      card:
-        - padding: 8px 10px
-        - border-radius: 14px
-        - border: |
-            [[[
-              const anyOn = (variables.entities || []).some(e => states[e]?.state === 'on');
-              return anyOn ? '2px solid seagreen' : '2px solid crimson';
-            ]]]
-    tap_action:
-      action: call-service
-      service: homeassistant.turn_off
-      confirmation:
-        text: Turn **off all zones** on both amps?
-      service_data:
-        entity_id: '[[[ return variables.entities ]]]'
   rti_zone_single_line:
     variables:
       zone_name: ''
       source_entity: ''
       volume_entity: ''
-      zone_index: 1
+      amp_key: ''
+      zone_num: 0
       volume_step: 1
     show_name: false
     show_icon: false
+    triggers_update: all
     styles:
       card:
         - padding: 8px
@@ -72,11 +41,12 @@ button_card_templates:
                   [[[
                     return entity.state === 'on'
                       ? 'var(--primary-color)'
-                      : 'var(--disabled-text-color)';
+                                              : 'var(--disabled-text-color)';
                   ]]]
       source:
         card:
           type: custom:button-card
+          entity: '[[[ return entity.entity_id ]]]'
           name: '[[[ return `S${states[variables.source_entity].state}`; ]]]'
           show_icon: false
           styles:
@@ -88,7 +58,9 @@ button_card_templates:
               - margin-left: 8px
               - border: |
                   [[[
-                    return states[entity.entity_id].state === 'on' ? '2px solid var(--primary-color)' : '1px solid var(--divider-color)';
+                    return entity.state === 'on'
+                      ? '2px solid var(--primary-color)'
+                      : '1px solid var(--divider-color)';
                   ]]]
           tap_action:
             action: call-service
@@ -133,34 +105,35 @@ button_card_templates:
               - width: 20px
           tap_action:
             action: call-service
-            service: mqtt.publish
+            service: number.set_value
             service_data:
-              topic: |
+              entity_id: '[[[ return variables.volume_entity ]]]'
+              value: |
                 [[[
-                  const id = variables.volume_entity.split('.')[1];
-                  const parts = id.split('_');
-                  const amp = parts[3];
-                  return `rti/ad8x/${amp}/zone/${variables.zone_index}/set/volume_down`;
+                  const e = variables.volume_entity;
+                  const cur = Number(states[e]?.state ?? 0);
+                  const step = variables.volume_step || 1;
+                  const next = Math.max(0, cur - step);
+                  return next;
                 ]]]
-              payload: '1'
-              qos: 0
           hold_action:
             action: call-service
-            service: mqtt.publish
+            service: number.set_value
             service_data:
-              topic: |
+              entity_id: '[[[ return variables.volume_entity ]]]'
+              value: |
                 [[[
-                  const id = variables.volume_entity.split('.')[1];
-                  const parts = id.split('_');
-                  const amp = parts[3];
-                  return `rti/ad8x/${amp}/zone/${variables.zone_index}/set/volume_down`;
+                  const e = variables.volume_entity;
+                  const cur = Number(states[e]?.state ?? 0);
+                  const step = variables.volume_step || 1;
+                  const next = Math.max(0, cur - step);
+                  return next;
                 ]]]
-              payload: '1'
-              qos: 0
-            repeat: 120
+            repeat: 400
       vol_level:
         card:
           type: custom:button-card
+          entity: '[[[ return variables.volume_entity ]]]'
           name: '[[[ return states[variables.volume_entity].state; ]]]'
           show_icon: false
           styles:
@@ -185,31 +158,65 @@ button_card_templates:
               - width: 20px
           tap_action:
             action: call-service
-            service: mqtt.publish
+            service: number.set_value
             service_data:
-              topic: |
+              entity_id: '[[[ return variables.volume_entity ]]]'
+              value: |
                 [[[
-                  const id = variables.volume_entity.split('.')[1];
-                  const parts = id.split('_');
-                  const amp = parts[3];
-                  return `rti/ad8x/${amp}/zone/${variables.zone_index}/set/volume_up`;
+                  const e = variables.volume_entity;
+                  const cur = Number(states[e]?.state ?? 0);
+                  const step = variables.volume_step || 1;
+                  const next = Math.min(75, cur + step);
+                  return next;
                 ]]]
-              payload: '1'
-              qos: 0
           hold_action:
             action: call-service
-            service: mqtt.publish
+            service: number.set_value
             service_data:
-              topic: |
+              entity_id: '[[[ return variables.volume_entity ]]]'
+              value: |
                 [[[
-                  const id = variables.volume_entity.split('.')[1];
-                  const parts = id.split('_');
-                  const amp = parts[3];
-                  return `rti/ad8x/${amp}/zone/${variables.zone_index}/set/volume_up`;
+                  const e = variables.volume_entity;
+                  const cur = Number(states[e]?.state ?? 0);
+                  const step = variables.volume_step || 1;
+                  const next = Math.min(75, cur + step);
+                  return next;
                 ]]]
-              payload: '1'
-              qos: 0
-            repeat: 120
+            repeat: 400
+  rti_all_off_both:
+    variables:
+      label: All Zones Off — Both Amps
+      entities: []
+    show_icon: true
+    icon: mdi:power
+    name: '[[[ return variables.label ]]]'
+    custom_fields:
+      sub: |
+        [[[
+          const list = variables.entities || [];
+          const onCount = list.filter(e => states[e]?.state === 'on').length;
+          return onCount > 0 ? `${onCount} on` : 'all off';
+        ]]]
+    styles:
+      grid:
+        - grid-template-areas: '"i n" "i sub"'
+        - grid-template-columns: 36px 1fr
+      card:
+        - padding: 8px 10px
+        - border-radius: 14px
+        - border: |
+            [[[
+              const anyOn = (variables.entities || []).some(e => states[e]?.state === 'on');
+              return anyOn ? '2px solid seagreen' : '2px solid crimson';
+            ]]]
+    tap_action:
+      action: call-service
+      service: mqtt.publish
+      service_data:
+        topic: rti/ad8x/all/set/all_off
+        payload: '1'
+      confirmation:
+        text: Turn **off all zones** on both amps?
   sonos_volume_line:
     variables:
       mp_entity: ''
@@ -244,12 +251,10 @@ button_card_templates:
             service: media_player.volume_mute
             service_data:
               entity_id: '[[[ return variables.mp_entity ]]]'
-              is_volume_muted: |
-                [[[
-                  const s = states[variables.mp_entity];
-                  if (!s || !s.attributes) return true;
-                  return !s.attributes.is_volume_muted;
-                ]]]
+              is_volume_muted: >-
+                [[[ const s = states[variables.mp_entity]; if (!s ||
+                !s.attributes) return true; return
+                !s.attributes.is_volume_muted; ]]]
           styles:
             card:
               - box-shadow: none
@@ -317,11 +322,11 @@ button_card_templates:
       vol_level:
         card:
           type: custom:button-card
+          entity: '[[[ return variables.mp_entity ]]]'
           name: |
             [[[
-              const s = states[variables.mp_entity];
-              if (!s || !s.attributes) return '-';
-              return Math.round((s.attributes.volume_level || 0) * 100);
+              if (!entity || !entity.attributes) return '-';
+              return Math.round((entity.attributes.volume_level || 0) * 100);
             ]]]
           show_icon: false
           styles:
@@ -397,6 +402,18 @@ views:
         content: '## Sonos Ports'
       - type: media-control
         entity: media_player.sonos_1
+      - type: entities
+        entities:
+          - entity: input_select.sonos_1_favorite
+            name: Station
+        card_mod:
+          style: |
+            ha-card {
+              background: rgba(var(--rgb-primary-text-color), 0.02);
+              border-radius: 14px;
+              box-shadow: none;
+              padding: 4px 16px;
+            }
       - type: media-control
         entity: media_player.sonos_2
       - type: markdown
@@ -409,29 +426,26 @@ views:
             - padding: 0 12px
           grid:
             - grid-template-areas: '"p s n v"'
-            - grid-template-columns: 48px 56px 1fr 64px
-            - column-gap: 8px
+            - grid-template-columns: 40px 45px 1fr 110px
+            - column-gap: 5px
           custom_fields:
             p:
               - justify-self: start
               - font-weight: 600
               - font-size: 12px
-              - white-space: nowrap
             s:
               - justify-self: start
               - font-weight: 600
+              - margin-left: 8px
               - font-size: 12px
-              - white-space: nowrap
             'n':
               - justify-self: start
               - font-weight: 600
               - font-size: 12px
-              - white-space: nowrap
             v:
-              - justify-self: end
+              - justify-self: center
               - font-weight: 600
               - font-size: 12px
-              - white-space: nowrap
         custom_fields:
           p: Power
           s: Source
@@ -446,7 +460,8 @@ views:
               zone_name: Kitchen
               source_entity: select.rti_ad_8x_amp1_kitchen_source
               volume_entity: number.rti_ad_8x_amp1_kitchen_volume
-              zone_index: 1
+              amp_key: amp1
+              zone_num: 1
           - type: custom:button-card
             template: rti_zone_single_line
             entity: switch.rti_ad_8x_amp1_great_room_power
@@ -454,7 +469,8 @@ views:
               zone_name: Great Room
               source_entity: select.rti_ad_8x_amp1_great_room_source
               volume_entity: number.rti_ad_8x_amp1_great_room_volume
-              zone_index: 2
+              amp_key: amp1
+              zone_num: 2
           - type: custom:button-card
             template: rti_zone_single_line
             entity: switch.rti_ad_8x_amp1_upper_deck_power
@@ -462,7 +478,8 @@ views:
               zone_name: Upper Deck
               source_entity: select.rti_ad_8x_amp1_upper_deck_source
               volume_entity: number.rti_ad_8x_amp1_upper_deck_volume
-              zone_index: 3
+              amp_key: amp1
+              zone_num: 3
           - type: custom:button-card
             template: rti_zone_single_line
             entity: switch.rti_ad_8x_amp1_master_bed_power
@@ -470,7 +487,8 @@ views:
               zone_name: Master Bed
               source_entity: select.rti_ad_8x_amp1_master_bed_source
               volume_entity: number.rti_ad_8x_amp1_master_bed_volume
-              zone_index: 4
+              amp_key: amp1
+              zone_num: 4
           - type: custom:button-card
             template: rti_zone_single_line
             entity: switch.rti_ad_8x_amp1_master_bath_power
@@ -478,7 +496,8 @@ views:
               zone_name: Master Bath
               source_entity: select.rti_ad_8x_amp1_master_bath_source
               volume_entity: number.rti_ad_8x_amp1_master_bath_volume
-              zone_index: 5
+              amp_key: amp1
+              zone_num: 5
           - type: custom:button-card
             template: rti_zone_single_line
             entity: switch.rti_ad_8x_amp1_mom_s_room_power
@@ -486,7 +505,8 @@ views:
               zone_name: Mom's Room
               source_entity: select.rti_ad_8x_amp1_mom_s_room_source
               volume_entity: number.rti_ad_8x_amp1_mom_s_room_volume
-              zone_index: 6
+              amp_key: amp1
+              zone_num: 6
           - type: custom:button-card
             template: rti_zone_single_line
             entity: switch.rti_ad_8x_amp1_office_power
@@ -494,7 +514,8 @@ views:
               zone_name: Office
               source_entity: select.rti_ad_8x_amp1_office_source
               volume_entity: number.rti_ad_8x_amp1_office_volume
-              zone_index: 7
+              amp_key: amp1
+              zone_num: 7
           - type: custom:button-card
             template: rti_zone_single_line
             entity: switch.rti_ad_8x_amp1_craft_room_power
@@ -502,9 +523,8 @@ views:
               zone_name: Craft Room
               source_entity: select.rti_ad_8x_amp1_craft_room_source
               volume_entity: number.rti_ad_8x_amp1_craft_room_volume
-              zone_index: 8
-      - type: vertical-stack
-        cards:
+              amp_key: amp1
+              zone_num: 8
           - type: custom:button-card
             template: rti_zone_single_line
             entity: switch.rti_ad_8x_amp2_laundry_power
@@ -512,7 +532,8 @@ views:
               zone_name: Laundry
               source_entity: select.rti_ad_8x_amp2_laundry_source
               volume_entity: number.rti_ad_8x_amp2_laundry_volume
-              zone_index: 1
+              amp_key: amp2
+              zone_num: 1
           - type: custom:button-card
             template: rti_zone_single_line
             entity: switch.rti_ad_8x_amp2_lower_bar_power
@@ -520,7 +541,8 @@ views:
               zone_name: Lower Bar
               source_entity: select.rti_ad_8x_amp2_lower_bar_source
               volume_entity: number.rti_ad_8x_amp2_lower_bar_volume
-              zone_index: 2
+              amp_key: amp2
+              zone_num: 2
           - type: custom:button-card
             template: rti_zone_single_line
             entity: switch.rti_ad_8x_amp2_golf_room_power
@@ -528,7 +550,8 @@ views:
               zone_name: Golf Room
               source_entity: select.rti_ad_8x_amp2_golf_room_source
               volume_entity: number.rti_ad_8x_amp2_golf_room_volume
-              zone_index: 3
+              amp_key: amp2
+              zone_num: 3
           - type: custom:button-card
             template: rti_zone_single_line
             entity: switch.rti_ad_8x_amp2_lower_guest_power
@@ -536,7 +559,8 @@ views:
               zone_name: Lower Guest
               source_entity: select.rti_ad_8x_amp2_lower_guest_source
               volume_entity: number.rti_ad_8x_amp2_lower_guest_volume
-              zone_index: 4
+              amp_key: amp2
+              zone_num: 4
           - type: custom:button-card
             template: rti_zone_single_line
             entity: switch.rti_ad_8x_amp2_fitness_power
@@ -544,7 +568,8 @@ views:
               zone_name: Fitness
               source_entity: select.rti_ad_8x_amp2_fitness_source
               volume_entity: number.rti_ad_8x_amp2_fitness_volume
-              zone_index: 5
+              amp_key: amp2
+              zone_num: 5
           - type: custom:button-card
             template: rti_zone_single_line
             entity: switch.rti_ad_8x_amp2_walkout_power
@@ -552,7 +577,8 @@ views:
               zone_name: Walkout
               source_entity: select.rti_ad_8x_amp2_walkout_source
               volume_entity: number.rti_ad_8x_amp2_walkout_volume
-              zone_index: 6
+              amp_key: amp2
+              zone_num: 6
           - type: custom:button-card
             template: rti_zone_single_line
             entity: switch.rti_ad_8x_amp2_pool_power
@@ -560,7 +586,8 @@ views:
               zone_name: Pool
               source_entity: select.rti_ad_8x_amp2_pool_source
               volume_entity: number.rti_ad_8x_amp2_pool_volume
-              zone_index: 7
+              amp_key: amp2
+              zone_num: 7
           - type: custom:button-card
             template: rti_zone_single_line
             entity: switch.rti_ad_8x_amp2_patio_power
@@ -568,12 +595,13 @@ views:
               zone_name: Patio
               source_entity: select.rti_ad_8x_amp2_patio_source
               volume_entity: number.rti_ad_8x_amp2_patio_volume
-              zone_index: 8
+              amp_key: amp2
+              zone_num: 8
       - type: markdown
         content: '## Sonos Volume'
       - type: custom:button-card
         color_type: label-card
-        show_name: false
+        name: Mute
         styles:
           card:
             - padding: 0 12px
@@ -581,6 +609,8 @@ views:
             - grid-template-areas: '"m n v"'
             - grid-template-columns: 40px 1fr auto
             - column-gap: 5px
+          name:
+            - justify-self: start
           custom_fields:
             'n':
               - justify-self: start
