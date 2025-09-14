@@ -1,0 +1,10 @@
+.venv/
+venv/
+__pycache__/
+*.pyc
+bridge.log
+logs/
+homeassistant/.storage/
+homeassistant/home-assistant_v2.db*
+secrets.yaml
+.env

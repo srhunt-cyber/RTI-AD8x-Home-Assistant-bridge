@@ -1,0 +1,137 @@
+#/homeassistant/automations.yaml
+- alias: RTI Zone → Auto Play Sonos (power on or source→1/2) [FINAL]
+  id: rti_zone_autoplay_sonos_power_or_source_final
+  mode: parallel
+  max: 16
+  trigger:
+    # A) A zone's power switch turns on
+    - platform: state
+      entity_id:
+        - switch.rti_ad_8x_amp1_kitchen_power
+        - switch.rti_ad_8x_amp1_great_room_power
+        - switch.rti_ad_8x_amp1_upper_deck_power
+        - switch.rti_ad_8x_amp1_master_bed_power
+        - switch.rti_ad_8x_amp1_master_bath_power
+        - switch.rti_ad_8x_amp1_mom_s_room_power
+        - switch.rti_ad_8x_amp1_office_power
+        - switch.rti_ad_8x_amp1_craft_room_power
+        - switch.rti_ad_8x_amp2_laundry_power
+        - switch.rti_ad_8x_amp2_lower_bar_power
+        - switch.rti_ad_8x_amp2_golf_room_power
+        - switch.rti_ad_8x_amp2_lower_guest_power
+        - switch.rti_ad_8x_amp2_fitness_power
+        - switch.rti_ad_8x_amp2_walkout_power
+        - switch.rti_ad_8x_amp2_pool_power
+        - switch.rti_ad_8x_amp2_patio_power
+      from: 'off'
+      to: 'on'
+    # B) A zone's source changes to 1 or 2
+    - platform: state
+      entity_id:
+        - select.rti_ad_8x_amp1_kitchen_source
+        - select.rti_ad_8x_amp1_great_room_source
+        - select.rti_ad_8x_amp1_upper_deck_source
+        - select.rti_ad_8x_amp1_master_bed_source
+        - select.rti_ad_8x_amp1_master_bath_source
+        - select.rti_ad_8x_amp1_mom_s_room_source
+        - select.rti_ad_8x_amp1_office_source
+        - select.rti_ad_8x_amp1_craft_room_source
+        - select.rti_ad_8x_amp2_laundry_source
+        - select.rti_ad_8x_amp2_lower_bar_source
+        - select.rti_ad_8x_amp2_golf_room_source
+        - select.rti_ad_8x_amp2_lower_guest_source
+        - select.rti_ad_8x_amp2_fitness_source
+        - select.rti_ad_8x_amp2_walkout_source
+        - select.rti_ad_8x_amp2_pool_source
+        - select.rti_ad_8x_amp2_patio_source
+      to:
+        - '1'
+        - '2'
+  variables:
+    # Map power switches to their corresponding source select entity
+    source_map:
+      switch.rti_ad_8x_amp1_kitchen_power: select.rti_ad_8x_amp1_kitchen_source
+      switch.rti_ad_8x_amp1_great_room_power: select.rti_ad_8x_amp1_great_room_source
+      switch.rti_ad_8x_amp1_upper_deck_power: select.rti_ad_8x_amp1_upper_deck_source
+      switch.rti_ad_8x_amp1_master_bed_power: select.rti_ad_8x_amp1_master_bed_source
+      switch.rti_ad_8x_amp1_master_bath_power: select.rti_ad_8x_amp1_master_bath_source
+      switch.rti_ad_8x_amp1_mom_s_room_power: select.rti_ad_8x_amp1_mom_s_room_source
+      switch.rti_ad_8x_amp1_office_power: select.rti_ad_8x_amp1_office_source
+      switch.rti_ad_8x_amp1_craft_room_power: select.rti_ad_8x_amp1_craft_room_source
+      switch.rti_ad_8x_amp2_laundry_power: select.rti_ad_8x_amp2_laundry_source
+      switch.rti_ad_8x_amp2_lower_bar_power: select.rti_ad_8x_amp2_lower_bar_source
+      switch.rti_ad_8x_amp2_golf_room_power: select.rti_ad_8x_amp2_golf_room_source
+      switch.rti_ad_8x_amp2_lower_guest_power: select.rti_ad_8x_amp2_lower_guest_source
+      switch.rti_ad_8x_amp2_fitness_power: select.rti_ad_8x_amp2_fitness_source
+      switch.rti_ad_8x_amp2_walkout_power: select.rti_ad_8x_amp2_walkout_source
+      switch.rti_ad_8x_amp2_pool_power: select.rti_ad_8x_amp2_pool_source
+      switch.rti_ad_8x_amp2_patio_power: select.rti_ad_8x_amp2_patio_source
+    # Map source numbers to Sonos media player entities
+    sonos_map:
+      '1': media_player.sonos_1
+      '2': media_player.sonos_2
+  action:
+    - variables:
+        # This single block determines the target player based on the trigger.
+        target_player: >-
+          {% if 'power' in trigger.entity_id %}
+            {% set source_entity = source_map.get(trigger.entity_id) %}
+            {% set source_num = states(source_entity) | int(0) | string %}
+          {% else %}
+            {% set source_num = trigger.to_state.state | int(0) | string %}
+          {% endif %}
+          {{ sonos_map.get(source_num) }}
+    # Condition: Abort if we didn't find a player, OR if that player is already playing.
+    - condition: template
+      value_template: "{{ target_player is not none and states(target_player) != 'playing' }}"
+    # Action: Send the play command to our dynamically determined target.
+    - service: media_player.media_play
+      target:
+        entity_id: "{{ target_player }}"
+
+- alias: Pyscript - Play Sonos Favorite from Dropdown
+  id: pyscript_play_sonos_favorite_from_dropdown
+  trigger:
+    - platform: state
+      entity_id: input_select.sonos_1_favorite
+  action:
+    # Do not call if the user selects the placeholder text
+    - condition: template
+      value_template: "{{ not trigger.to_state.state.startswith('(') }}"
+    # Call the Pyscript service to play the selected item
+    - service: pyscript.sonos_play_selected_favorite_1
+      data:
+        option: "{{ trigger.to_state.state }}"
+        
+# --------------------------------------------
+# Sonos Favorites → auto-refresh on HA start
+# --------------------------------------------
+- alias: Sonos Favorites → Refresh on HA Start
+  id: sonos_favorites_refresh_on_ha_start
+  mode: restart
+  trigger:
+    - platform: homeassistant
+      event: start
+  action:
+    # Wait until at least one Sonos player exposes source_list (avoids startup race)
+    - wait_template: >
+        {{ states.media_player
+           | selectattr('attributes.source_list','defined')
+           | list | length > 0 }}
+      timeout: "00:02:00"
+      continue_on_timeout: true
+    - delay: "00:00:05"
+    - service: pyscript.sonos_refresh_favorites_1
+
+# --------------------------------------------
+# Sonos Favorites → refresh every 3 hours
+# --------------------------------------------
+- alias: Sonos Favorites → Refresh every 3h
+  id: sonos_favorites_refresh_every_3h
+  mode: single
+  trigger:
+    - platform: time_pattern
+      hours: "/3"
+  action:
+    - service: pyscript.sonos_refresh_favorites_1
+        

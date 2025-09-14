@@ -1,0 +1,397 @@
+# ================================
+# Home Assistant - configuration.yaml
+# ================================
+
+default_config:
+
+script: !include scripts.yaml
+automation: !include automations.yaml
+
+# -------------------------------
+# Pyscript Configuration
+# -------------------------------
+pyscript:
+  allow_all_imports: true
+  hass_is_global: true
+
+# -------------------------------
+# Logger Configuration
+# -------------------------------
+logger:
+  default: info
+  logs:
+    custom_components.pyscript: info
+    homeassistant.components.emulated_hue: info
+    homeassistant.components.template.light: info
+
+# -------------------------------
+# Template Light (modern `template:` integration)
+# Kitchen Music — SAFE-CLAMPED 5..40 of 0..79 (higher = louder)
+# -------------------------------
+
+template:
+  - light:
+      # ===== AMP1 (Corrected set_level syntax) =====
+      - name: "Kitchen Speakers"
+        unique_id: ad8x_amp1_kitchen_music_light
+        state: "{{ is_state('switch.rti_ad_8x_amp1_kitchen_power', 'on') }}"
+        level: >
+          {% set v = states('number.rti_ad_8x_amp1_kitchen_volume') | float(15) %}
+          {% set v = [40, [v, 5]|max]|min %}
+          {{ (((v - 5) / (35)) * 253 + 1) | round(0) }}
+        set_level:
+          - variables: { b: "{{ [[brightness | int, 1] | max, 254] | min }}", v: "{{ ((b - 1) / 253.0) * 35 + 5 }}" }
+          - service: number.set_value
+            target: { entity_id: number.rti_ad_8x_amp1_kitchen_volume }
+            data:   { value: "{{ [40, [v, 5]|max]|min | round(0) }}" }
+        turn_on:
+          - service: switch.turn_on
+            target: { entity_id: switch.rti_ad_8x_amp1_kitchen_power }
+          - service: number.set_value
+            target: { entity_id: number.rti_ad_8x_amp1_kitchen_volume }
+            data:   { value: 15 }
+        turn_off:
+          - service: switch.turn_off
+            target: { entity_id: switch.rti_ad_8x_amp1_kitchen_power }
+
+      - name: "Great Room Speakers"
+        unique_id: ad8x_amp1_great_room_music_light
+        state: "{{ is_state('switch.rti_ad_8x_amp1_great_room_power', 'on') }}"
+        level: >
+          {% set v = states('number.rti_ad_8x_amp1_great_room_volume') | float(15) %}
+          {% set v = [40, [v, 5]|max]|min %}
+          {{ (((v - 5) / (35)) * 253 + 1) | round(0) }}
+        set_level:
+          - variables: { b: "{{ [[brightness | int, 1] | max, 254] | min }}", v: "{{ ((b - 1) / 253.0) * 35 + 5 }}" }
+          - service: number.set_value
+            target: { entity_id: number.rti_ad_8x_amp1_great_room_volume }
+            data:   { value: "{{ [40, [v, 5]|max]|min | round(0) }}" }
+        turn_on:
+          - service: switch.turn_on
+            target: { entity_id: switch.rti_ad_8x_amp1_great_room_power }
+          - service: number.set_value
+            target: { entity_id: number.rti_ad_8x_amp1_great_room_volume }
+            data:   { value: 15 }
+        turn_off:
+          - service: switch.turn_off
+            target: { entity_id: switch.rti_ad_8x_amp1_great_room_power }
+
+      - name: "Upper Deck Speakers"
+        unique_id: ad8x_amp1_upper_deck_music_light
+        state: "{{ is_state('switch.rti_ad_8x_amp1_upper_deck_power', 'on') }}"
+        level: >
+          {% set v = states('number.rti_ad_8x_amp1_upper_deck_volume') | float(15) %}
+          {% set v = [40, [v, 5]|max]|min %}
+          {{ (((v - 5) / (35)) * 253 + 1) | round(0) }}
+        set_level:
+          - variables: { b: "{{ [[brightness | int, 1] | max, 254] | min }}", v: "{{ ((b - 1) / 253.0) * 35 + 5 }}" }
+          - service: number.set_value
+            target: { entity_id: number.rti_ad_8x_amp1_upper_deck_volume }
+            data:   { value: "{{ [40, [v, 5]|max]|min | round(0) }}" }
+        turn_on:
+          - service: switch.turn_on
+            target: { entity_id: switch.rti_ad_8x_amp1_upper_deck_power }
+          - service: number.set_value
+            target: { entity_id: number.rti_ad_8x_amp1_upper_deck_volume }
+            data:   { value: 15 }
+        turn_off:
+          - service: switch.turn_off
+            target: { entity_id: switch.rti_ad_8x_amp1_upper_deck_power }
+
+      - name: "Master Bed Speakers"
+        unique_id: ad8x_amp1_master_bed_music_light
+        state: "{{ is_state('switch.rti_ad_8x_amp1_master_bed_power', 'on') }}"
+        level: >
+          {% set v = states('number.rti_ad_8x_amp1_master_bed_volume') | float(15) %}
+          {% set v = [40, [v, 5]|max]|min %}
+          {{ (((v - 5) / (35)) * 253 + 1) | round(0) }}
+        set_level:
+          - variables: { b: "{{ [[brightness | int, 1] | max, 254] | min }}", v: "{{ ((b - 1) / 253.0) * 35 + 5 }}" }
+          - service: number.set_value
+            target: { entity_id: number.rti_ad_8x_amp1_master_bed_volume }
+            data:   { value: "{{ [40, [v, 5]|max]|min | round(0) }}" }
+        turn_on:
+          - service: switch.turn_on
+            target: { entity_id: switch.rti_ad_8x_amp1_master_bed_power }
+          - service: number.set_value
+            target: { entity_id: number.rti_ad_8x_amp1_master_bed_volume }
+            data:   { value: 15 }
+        turn_off:
+          - service: switch.turn_off
+            target: { entity_id: switch.rti_ad_8x_amp1_master_bed_power }
+
+      - name: "Master Bath Speakers"
+        unique_id: ad8x_amp1_master_bath_music_light
+        state: "{{ is_state('switch.rti_ad_8x_amp1_master_bath_power', 'on') }}"
+        level: >
+          {% set v = states('number.rti_ad_8x_amp1_master_bath_volume') | float(15) %}
+          {% set v = [40, [v, 5]|max]|min %}
+          {{ (((v - 5) / (35)) * 253 + 1) | round(0) }}
+        set_level:
+          - variables: { b: "{{ [[brightness | int, 1] | max, 254] | min }}", v: "{{ ((b - 1) / 253.0) * 35 + 5 }}" }
+          - service: number.set_value
+            target: { entity_id: number.rti_ad_8x_amp1_master_bath_volume }
+            data:   { value: "{{ [40, [v, 5]|max]|min | round(0) }}" }
+        turn_on:
+          - service: switch.turn_on
+            target: { entity_id: switch.rti_ad_8x_amp1_master_bath_power }
+          - service: number.set_value
+            target: { entity_id: number.rti_ad_8x_amp1_master_bath_volume }
+            data:   { value: 15 }
+        turn_off:
+          - service: switch.turn_off
+            target: { entity_id: switch.rti_ad_8x_amp1_master_bath_power }
+
+      - name: "Mom's Room Speakers"
+        unique_id: ad8x_amp1_mom_s_room_music_light
+        state: "{{ is_state('switch.rti_ad_8x_amp1_mom_s_room_power', 'on') }}"
+        level: >
+          {% set v = states('number.rti_ad_8x_amp1_mom_s_room_volume') | float(15) %}
+          {% set v = [40, [v, 5]|max]|min %}
+          {{ (((v - 5) / (35)) * 253 + 1) | round(0) }}
+        set_level:
+          - variables: { b: "{{ [[brightness | int, 1] | max, 254] | min }}", v: "{{ ((b - 1) / 253.0) * 35 + 5 }}" }
+          - service: number.set_value
+            target: { entity_id: number.rti_ad_8x_amp1_mom_s_room_volume }
+            data:   { value: "{{ [40, [v, 5]|max]|min | round(0) }}" }
+        turn_on:
+          - service: switch.turn_on
+            target: { entity_id: switch.rti_ad_8x_amp1_mom_s_room_power }
+          - service: number.set_value
+            target: { entity_id: number.rti_ad_8x_amp1_mom_s_room_volume }
+            data:   { value: 15 }
+        turn_off:
+          - service: switch.turn_off
+            target: { entity_id: switch.rti_ad_8x_amp1_mom_s_room_power }
+
+      - name: "Office Speakers"
+        unique_id: ad8x_amp1_office_music_light
+        state: "{{ is_state('switch.rti_ad_8x_amp1_office_power', 'on') }}"
+        level: >
+          {% set v = states('number.rti_ad_8x_amp1_office_volume') | float(15) %}
+          {% set v = [40, [v, 5]|max]|min %}
+          {{ (((v - 5) / (35)) * 253 + 1) | round(0) }}
+        set_level:
+          - variables: { b: "{{ [[brightness | int, 1] | max, 254] | min }}", v: "{{ ((b - 1) / 253.0) * 35 + 5 }}" }
+          - service: number.set_value
+            target: { entity_id: number.rti_ad_8x_amp1_office_volume }
+            data:   { value: "{{ [40, [v, 5]|max]|min | round(0) }}" }
+        turn_on:
+          - service: switch.turn_on
+            target: { entity_id: switch.rti_ad_8x_amp1_office_power }
+          - service: number.set_value
+            target: { entity_id: number.rti_ad_8x_amp1_office_volume }
+            data:   { value: 15 }
+        turn_off:
+          - service: switch.turn_off
+            target: { entity_id: switch.rti_ad_8x_amp1_office_power }
+
+      - name: "Craft Room Speakers"
+        unique_id: ad8x_amp1_craft_room_music_light
+        state: "{{ is_state('switch.rti_ad_8x_amp1_craft_room_power', 'on') }}"
+        level: >
+          {% set v = states('number.rti_ad_8x_amp1_craft_room_volume') | float(15) %}
+          {% set v = [40, [v, 5]|max]|min %}
+          {{ (((v - 5) / (35)) * 253 + 1) | round(0) }}
+        set_level:
+          - variables: { b: "{{ [[brightness | int, 1] | max, 254] | min }}", v: "{{ ((b - 1) / 253.0) * 35 + 5 }}" }
+          - service: number.set_value
+            target: { entity_id: number.rti_ad_8x_amp1_craft_room_volume }
+            data:   { value: "{{ [40, [v, 5]|max]|min | round(0) }}" }
+        turn_on:
+          - service: switch.turn_on
+            target: { entity_id: switch.rti_ad_8x_amp1_craft_room_power }
+          - service: number.set_value
+            target: { entity_id: number.rti_ad_8x_amp1_craft_room_volume }
+            data:   { value: 15 }
+        turn_off:
+          - service: switch.turn_off
+            target: { entity_id: switch.rti_ad_8x_amp1_craft_room_power }
+
+      # ===== AMP2 =====
+      - name: "Laundry Speakers"
+        unique_id: ad8x_amp2_laundry_music_light
+        state: "{{ is_state('switch.rti_ad_8x_amp2_laundry_power', 'on') }}"
+        level: >
+          {% set v = states('number.rti_ad_8x_amp2_laundry_volume') | float(15) %}
+          {% set v = [40, [v, 5]|max]|min %}
+          {{ (((v - 5) / (35)) * 253 + 1) | round(0) }}
+        set_level:
+          - variables: { b: "{{ [[brightness | int, 1] | max, 254] | min }}", v: "{{ ((b - 1) / 253.0) * 35 + 5 }}" }
+          - service: number.set_value
+            target: { entity_id: number.rti_ad_8x_amp2_laundry_volume }
+            data:   { value: "{{ [40, [v, 5]|max]|min | round(0) }}" }
+        turn_on:
+          - service: switch.turn_on
+            target: { entity_id: switch.rti_ad_8x_amp2_laundry_power }
+          - service: number.set_value
+            target: { entity_id: number.rti_ad_8x_amp2_laundry_volume }
+            data:   { value: 15 }
+        turn_off:
+          - service: switch.turn_off
+            target: { entity_id: switch.rti_ad_8x_amp2_laundry_power }
+
+      - name: "Lower Bar Speakers"
+        unique_id: ad8x_amp2_lower_bar_music_light
+        state: "{{ is_state('switch.rti_ad_8x_amp2_lower_bar_power', 'on') }}"
+        level: >
+          {% set v = states('number.rti_ad_8x_amp2_lower_bar_volume') | float(15) %}
+          {% set v = [40, [v, 5]|max]|min %}
+          {{ (((v - 5) / (35)) * 253 + 1) | round(0) }}
+        set_level:
+          - variables: { b: "{{ [[brightness | int, 1] | max, 254] | min }}", v: "{{ ((b - 1) / 253.0) * 35 + 5 }}" }
+          - service: number.set_value
+            target: { entity_id: number.rti_ad_8x_amp2_lower_bar_volume }
+            data:   { value: "{{ [40, [v, 5]|max]|min | round(0) }}" }
+        turn_on:
+          - service: switch.turn_on
+            target: { entity_id: switch.rti_ad_8x_amp2_lower_bar_power }
+          - service: number.set_value
+            target: { entity_id: number.rti_ad_8x_amp2_lower_bar_volume }
+            data:   { value: 15 }
+        turn_off:
+          - service: switch.turn_off
+            target: { entity_id: switch.rti_ad_8x_amp2_lower_bar_power }
+
+      - name: "Golf Room Speakers"
+        unique_id: ad8x_amp2_golf_room_music_light
+        state: "{{ is_state('switch.rti_ad_8x_amp2_golf_room_power', 'on') }}"
+        level: >
+          {% set v = states('number.rti_ad_8x_amp2_golf_room_volume') | float(15) %}
+          {% set v = [40, [v, 5]|max]|min %}
+          {{ (((v - 5) / (35)) * 253 + 1) | round(0) }}
+        set_level:
+          - variables: { b: "{{ [[brightness | int, 1] | max, 254] | min }}", v: "{{ ((b - 1) / 253.0) * 35 + 5 }}" }
+          - service: number.set_value
+            target: { entity_id: number.rti_ad_8x_amp2_golf_room_volume }
+            data:   { value: "{{ [40, [v, 5]|max]|min | round(0) }}" }
+        turn_on:
+          - service: switch.turn_on
+            target: { entity_id: switch.rti_ad_8x_amp2_golf_room_power }
+          - service: number.set_value
+            target: { entity_id: number.rti_ad_8x_amp2_golf_room_volume }
+            data:   { value: 15 }
+        turn_off:
+          - service: switch.turn_off
+            target: { entity_id: switch.rti_ad_8x_amp2_golf_room_power }
+
+      - name: "Lower Guest Speakers"
+        unique_id: ad8x_amp2_lower_guest_music_light
+        state: "{{ is_state('switch.rti_ad_8x_amp2_lower_guest_power', 'on') }}"
+        level: >
+          {% set v = states('number.rti_ad_8x_amp2_lower_guest_volume') | float(15) %}
+          {% set v = [40, [v, 5]|max]|min %}
+          {{ (((v - 5) / (35)) * 253 + 1) | round(0) }}
+        set_level:
+          - variables: { b: "{{ [[brightness | int, 1] | max, 254] | min }}", v: "{{ ((b - 1) / 253.0) * 35 + 5 }}" }
+          - service: number.set_value
+            target: { entity_id: number.rti_ad_8x_amp2_lower_guest_volume }
+            data:   { value: "{{ [40, [v, 5]|max]|min | round(0) }}" }
+        turn_on:
+          - service: switch.turn_on
+            target: { entity_id: switch.rti_ad_8x_amp2_lower_guest_power }
+          - service: number.set_value
+            target: { entity_id: number.rti_ad_8x_amp2_lower_guest_volume }
+            data:   { value: 15 }
+        turn_off:
+          - service: switch.turn_off
+            target: { entity_id: switch.rti_ad_8x_amp2_lower_guest_power }
+
+      - name: "Fitness Speakers"
+        unique_id: ad8x_amp2_fitness_music_light
+        state: "{{ is_state('switch.rti_ad_8x_amp2_fitness_power', 'on') }}"
+        level: >
+          {% set v = states('number.rti_ad_8x_amp2_fitness_volume') | float(15) %}
+          {% set v = [40, [v, 5]|max]|min %}
+          {{ (((v - 5) / (35)) * 253 + 1) | round(0) }}
+        set_level:
+          - variables: { b: "{{ [[brightness | int, 1] | max, 254] | min }}", v: "{{ ((b - 1) / 253.0) * 35 + 5 }}" }
+          - service: number.set_value
+            target: { entity_id: number.rti_ad_8x_amp2_fitness_volume }
+            data:   { value: "{{ [40, [v, 5]|max]|min | round(0) }}" }
+        turn_on:
+          - service: switch.turn_on
+            target: { entity_id: switch.rti_ad_8x_amp2_fitness_power }
+          - service: number.set_value
+            target: { entity_id: number.rti_ad_8x_amp2_fitness_volume }
+            data:   { value: 15 }
+        turn_off:
+          - service: switch.turn_off
+            target: { entity_id: switch.rti_ad_8x_amp2_fitness_power }
+
+      - name: "Walkout Speakers"
+        unique_id: ad8x_amp2_walkout_music_light
+        state: "{{ is_state('switch.rti_ad_8x_amp2_walkout_power', 'on') }}"
+        level: >
+          {% set v = states('number.rti_ad_8x_amp2_walkout_volume') | float(15) %}
+          {% set v = [40, [v, 5]|max]|min %}
+          {{ (((v - 5) / (35)) * 253 + 1) | round(0) }}
+        set_level:
+          - variables: { b: "{{ [[brightness | int, 1] | max, 254] | min }}", v: "{{ ((b - 1) / 253.0) * 35 + 5 }}" }
+          - service: number.set_value
+            target: { entity_id: number.rti_ad_8x_amp2_walkout_volume }
+            data:   { value: "{{ [40, [v, 5]|max]|min | round(0) }}" }
+        turn_on:
+          - service: switch.turn_on
+            target: { entity_id: switch.rti_ad_8x_amp2_walkout_power }
+          - service: number.set_value
+            target: { entity_id: number.rti_ad_8x_amp2_walkout_volume }
+            data:   { value: 15 }
+        turn_off:
+          - service: switch.turn_off
+            target: { entity_id: switch.rti_ad_8x_amp2_walkout_power }
+
+      - name: "Pool Speakers"
+        unique_id: ad8x_amp2_pool_music_light
+        state: "{{ is_state('switch.rti_ad_8x_amp2_pool_power', 'on') }}"
+        level: >
+          {% set v = states('number.rti_ad_8x_amp2_pool_volume') | float(15) %}
+          {% set v = [40, [v, 5]|max]|min %}
+          {{ (((v - 5) / (35)) * 253 + 1) | round(0) }}
+        set_level:
+          - variables: { b: "{{ [[brightness | int, 1] | max, 254] | min }}", v: "{{ ((b - 1) / 253.0) * 35 + 5 }}" }
+          - service: number.set_value
+            target: { entity_id: number.rti_ad_8x_amp2_pool_volume }
+            data:   { value: "{{ [40, [v, 5]|max]|min | round(0) }}" }
+        turn_on:
+          - service: switch.turn_on
+            target: { entity_id: switch.rti_ad_8x_amp2_pool_power }
+          - service: number.set_value
+            target: { entity_id: number.rti_ad_8x_amp2_pool_volume }
+            data:   { value: 15 }
+        turn_off:
+          - service: switch.turn_off
+            target: { entity_id: switch.rti_ad_8x_amp2_pool_power }
+
+      - name: "Patio Speakers"
+        unique_id: ad8x_amp2_patio_music_light
+        state: "{{ is_state('switch.rti_ad_8x_amp2_patio_power', 'on') }}"
+        level: >
+          {% set v = states('number.rti_ad_8x_amp2_patio_volume') | float(15) %}
+          {% set v = [40, [v, 5]|max]|min %}
+          {{ (((v - 5) / (35)) * 253 + 1) | round(0) }}
+        set_level:
+          - variables: { b: "{{ [[brightness | int, 1] | max, 254] | min }}", v: "{{ ((b - 1) / 253.0) * 35 + 5 }}" }
+          - service: number.set_value
+            target: { entity_id: number.rti_ad_8x_amp2_patio_volume }
+            data:   { value: "{{ [40, [v, 5]|max]|min | round(0) }}" }
+        turn_on:
+          - service: switch.turn_on
+            target: { entity_id: switch.rti_ad_8x_amp2_patio_power }
+          - service: number.set_value
+            target: { entity_id: number.rti_ad_8x_amp2_patio_volume }
+            data:   { value: 15 }
+        turn_off:
+          - service: switch.turn_off
+            target: { entity_id: switch.rti_ad_8x_amp2_patio_power }
+# --- Helpers for control & manual trigger ---
+input_boolean:
+  sonos_favorites_autorefresh:
+    name: Sonos Favorites Auto-Refresh
+    icon: mdi:playlist-music
+
+input_button:
+  sonos_favorites_refresh_now:
+    name: Refresh Sonos Favorites Now
+    icon: mdi:refresh
+

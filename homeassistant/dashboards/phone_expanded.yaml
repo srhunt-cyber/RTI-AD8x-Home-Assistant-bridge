@@ -1,0 +1,626 @@
+title: RTI / House Music (Phone)
+button_card_templates:
+  rti_all_off_both:
+    variables:
+      label: All Zones Off — Both Amps
+      entities: []
+    show_icon: true
+    icon: mdi:power
+    name: '[[[ return variables.label ]]]'
+    triggers_update: all
+    custom_fields:
+      sub: |
+        [[[
+          const list = variables.entities || [];
+          const onCount = list.filter(e => states[e]?.state === 'on').length;
+          return onCount > 0 ? `${onCount} on` : 'all off';
+        ]]]
+    styles:
+      grid:
+        - grid-template-areas: '"i n" "i sub"'
+        - grid-template-columns: 36px 1fr
+        - grid-template-rows: auto auto
+        - column-gap: 10px
+      card:
+        - padding: 8px 10px
+        - border-radius: 14px
+        - box-shadow: none
+        - border: |
+            [[[
+              const list = variables.entities || [];
+              const anyOn = list.some(e => states[e]?.state === 'on');
+              return anyOn ? '2px solid seagreen' : '2px solid crimson';
+            ]]]
+        - background: |
+            [[[
+              const list = variables.entities || [];
+              const anyOn = list.some(e => states[e]?.state === 'on');
+              return anyOn ? 'rgba(46,139,87,0.12)' : 'rgba(220,20,60,0.10)';
+            ]]]
+      icon:
+        - width: 20px
+        - height: 20px
+        - color: |
+            [[[
+              const list = variables.entities || [];
+              const anyOn = list.some(e => states[e]?.state === 'on');
+              return anyOn ? 'seagreen' : 'crimson';
+            ]]]
+        - align-self: center
+      name:
+        - font-weight: 800
+        - font-size: 16px
+        - align-self: center
+      custom_fields:
+        sub:
+          - margin-top: '-2px'
+          - font-size: 12px
+          - color: var(--secondary-text-color)
+    tap_action:
+      action: call-service
+      service: homeassistant.turn_off
+      confirmation:
+        text: Turn **off all zones** on both amps?
+      service_data:
+        entity_id: '[[[ return variables.entities ]]]'
+  rti_zone_row_compact:
+    variables:
+      zone_name: ''
+      source_entity: ''
+      volume_entity: ''
+      volume_min: 0
+      volume_max: 75
+      volume_step: 2
+    show_icon: false
+    show_name: true
+    styles:
+      grid:
+        - grid-template-areas: |
+            "n    n"
+            "source power"
+            "volume volume"
+        - grid-template-columns: 1fr auto
+        - grid-template-rows: auto auto auto
+        - row-gap: 4px
+      card:
+        - padding: 6px 8px
+        - border-radius: 12px
+        - box-shadow: none
+        - border: none
+        - background: |
+            [[[
+              return entity.state === 'on'
+                ? 'rgba(46,139,87,0.04)'
+                : 'rgba(0,0,0,0.02)';
+            ]]]
+      name:
+        - grid-area: 'n'
+        - justify-self: start
+        - align-self: center
+        - font-weight: 800
+        - font-size: 16px
+        - padding: 0
+    name: '[[[ return variables.zone_name ]]]'
+    custom_fields:
+      source:
+        card:
+          type: horizontal-stack
+          cards:
+            - type: custom:button-card
+              name: 'Sonos:'
+              show_icon: false
+              styles:
+                card:
+                  - padding: 0
+                  - margin-right: 6px
+                  - box-shadow: none
+                  - background: none
+                  - border: none
+                  - height: 26px
+                name:
+                  - font-size: 13px
+                  - font-weight: 700
+                  - align-self: center
+              tap_action:
+                action: none
+            - type: custom:button-card
+              name: '1'
+              show_icon: false
+              styles:
+                card:
+                  - height: 26px
+                  - width: 26px
+                  - border-radius: 999px
+                  - font-size: 13px
+                  - padding: 0
+                  - box-shadow: none
+                  - border: |
+                      [[[
+                        const on = states[variables.source_entity]?.state === '1';
+                        return on ? '2px solid seagreen' : '1px solid var(--divider-color)';
+                      ]]]
+                  - background: |
+                      [[[
+                        const on = states[variables.source_entity]?.state === '1';
+                        return on ? 'rgba(46,139,87,0.18)' : 'transparent';
+                      ]]]
+                  - color: |
+                      [[[
+                        const on = states[variables.source_entity]?.state === '1'
+                          ? 'seagreen' : 'var(--primary-text-color)';
+                      ]]]
+              tap_action:
+                action: call-service
+                service: select.select_option
+                service_data:
+                  entity_id: '[[[ return variables.source_entity ]]]'
+                  option: '1'
+            - type: custom:button-card
+              name: '2'
+              show_icon: false
+              styles:
+                card:
+                  - height: 26px
+                  - width: 26px
+                  - border-radius: 999px
+                  - font-size: 13px
+                  - padding: 0
+                  - margin-left: 6px
+                  - box-shadow: none
+                  - border: |
+                      [[[
+                        const on = states[variables.source_entity]?.state === '2';
+                        return on ? '2px solid seagreen' : '1px solid var(--divider-color)';
+                      ]]]
+                  - background: |
+                      [[[
+                        const on = states[variables.source_entity]?.state === '2';
+                        return on ? 'rgba(46,139,87,0.18)' : 'transparent';
+                      ]]]
+                  - color: |
+                      [[[
+                        const on = states[variables.source_entity]?.state === '2'
+                          ? 'seagreen' : 'var(--primary-text-color)';
+                      ]]]
+              tap_action:
+                action: call-service
+                service: select.select_option
+                service_data:
+                  entity_id: '[[[ return variables.source_entity ]]]'
+                  option: '2'
+      power:
+        card:
+          type: entities
+          show_header_toggle: false
+          entities:
+            - entity: '[[[ return entity.entity_id ]]]'
+              name: 'On/Off:'
+              icon: ''
+          card_mod:
+            style: >
+              ha-card { box-shadow: none; background: none; padding: 0; }
+
+              .mdc-list { padding: 0; }
+
+              .mdc-list-item { min-height: 28px; padding: 0; }
+
+              .mdc-list-item__graphic, .secondary { display: none; }
+
+              .mdc-list-item__primary-text { font-weight: 700; font-size: 13px;
+              }
+      volume:
+        card:
+          type: conditional
+          conditions:
+            - entity: '[[[ return entity.entity_id ]]]'
+              state: 'on'
+          card:
+            type: horizontal-stack
+            cards:
+              - type: custom:button-card
+                name: −
+                show_icon: false
+                styles:
+                  card:
+                    - height: 30px
+                    - width: 46px
+                    - border-radius: 999px
+                    - font-size: 18px
+                    - box-shadow: none
+                    - border: 1px solid var(--divider-color)
+                tap_action:
+                  action: call-service
+                  service: number.set_value
+                  service_data:
+                    entity_id: '[[[ return variables.volume_entity ]]]'
+                    value: |
+                      [[[
+                        const cur = Number(states[variables.volume_entity]?.state || 0);
+                        const step = Number(variables.volume_step || 2);
+                        const min = Number(variables.volume_min ?? 0);
+                        return Math.max(min, cur - step);
+                      ]]]
+                hold_action:
+                  action: call-service
+                  repeat: 300
+                  service: number.set_value
+                  service_data:
+                    entity_id: '[[[ return variables.volume_entity ]]]'
+                    value: |
+                      [[[
+                        const cur = Number(states[variables.volume_entity]?.state || 0);
+                        const step = Number(variables.volume_step || 2);
+                        const min = Number(variables.volume_min ?? 0);
+                        return Math.max(min, cur - step);
+                      ]]]
+              - type: entities
+                show_header_toggle: false
+                entities:
+                  - type: custom:slider-entity-row
+                    entity: '[[[ return variables.volume_entity ]]]'
+                    name: ''
+                    min: '[[[ return variables.volume_min ?? 0 ]]]'
+                    max: '[[[ return variables.volume_max ?? 75 ]]]'
+                    step: '[[[ return variables.volume_step ?? 2 ]]]'
+                    full_row: true
+                    grow: true
+                    hide_state: false
+                    hide_when_off: true
+                card_mod:
+                  style: >
+                    ha-card { box-shadow: none; padding: 0 4px; background:
+                    none; }
+
+                    .mdc-slider { height: 20px; }
+              - type: custom:button-card
+                name: +
+                show_icon: false
+                styles:
+                  card:
+                    - height: 30px
+                    - width: 46px
+                    - border-radius: 999px
+                    - font-size: 18px
+                    - box-shadow: none
+                    - border: 1px solid var(--divider-color)
+                tap_action:
+                  action: call-service
+                  service: number.set_value
+                  service_data:
+                    entity_id: '[[[ return variables.volume_entity ]]]'
+                    value: |
+                      [[[
+                        const cur = Number(states[variables.volume_entity]?.state || 0);
+                        const step = Number(variables.volume_step || 2);
+                        const max = Number(variables.volume_max ?? 75);
+                        return Math.min(max, cur + step);
+                      ]]]
+                hold_action:
+                  action: call-service
+                  repeat: 300
+                  service: number.set_value
+                  service_data:
+                    entity_id: '[[[ return variables.volume_entity ]]]'
+                    value: |
+                      [[[
+                        const cur = Number(states[variables.volume_entity]?.state || 0);
+                        const step = Number(variables.volume_step || 2);
+                        const max = Number(variables.volume_max ?? 75);
+                        return Math.min(max, cur + step);
+                      ]]]
+  sonos_quick_row:
+    variables:
+      mp_entity: ''
+      label: ''
+      step: 0.05
+    show_icon: false
+    show_name: false
+    styles:
+      grid:
+        - grid-template-areas: '"row"'
+        - grid-template-columns: 1fr
+      card:
+        - padding: 4px 0
+        - box-shadow: none
+        - border: none
+        - background: none
+    custom_fields:
+      row:
+        card:
+          type: horizontal-stack
+          cards:
+            - type: custom:button-card
+              name: −
+              show_icon: false
+              styles:
+                card:
+                  - height: 34px
+                  - width: 46px
+                  - border-radius: 999px
+                  - font-size: 18px
+                  - box-shadow: none
+                  - border: 1px solid var(--divider-color)
+              tap_action:
+                action: call-service
+                service: media_player.volume_set
+                service_data:
+                  entity_id: '[[[ return variables.mp_entity ]]]'
+                  volume_level: |
+                    [[[
+                      const s = states[variables.mp_entity]?.attributes?.volume_level ?? 0;
+                      const step = Number(variables.step || 0.05);
+                      return Math.max(0, (s - step).toFixed(2));
+                    ]]]
+            - type: custom:button-card
+              name: |
+                [[[
+                  const s = states[variables.mp_entity];
+                  const vol = Math.round((s?.attributes?.volume_level ?? 0)*100);
+                  const muted = s?.attributes?.is_volume_muted;
+                  return `${variables.label} ${muted ? '(muted)' : vol + '%'}`;
+                ]]]
+              show_icon: false
+              styles:
+                card:
+                  - height: 34px
+                  - border-radius: 10px
+                  - padding: 0 10px
+                  - box-shadow: none
+                  - border: 1px solid var(--divider-color)
+                name:
+                  - font-size: 14px
+                  - font-weight: 600
+                  - align-self: center
+            - type: custom:button-card
+              name: +
+              show_icon: false
+              styles:
+                card:
+                  - height: 34px
+                  - width: 46px
+                  - border-radius: 999px
+                  - font-size: 18px
+                  - box-shadow: none
+                  - border: 1px solid var(--divider-color)
+              tap_action:
+                action: call-service
+                service: media_player.volume_set
+                service_data:
+                  entity_id: '[[[ return variables.mp_entity ]]]'
+                  volume_level: |
+                    [[[
+                      const s = states[variables.mp_entity]?.attributes?.volume_level ?? 0;
+                      const step = Number(variables.step || 0.05);
+                      return Math.min(1, (s + step).toFixed(2));
+                    ]]]
+            - type: custom:button-card
+              icon: |
+                [[[
+                  const muted = states[variables.mp_entity]?.attributes?.is_volume_muted;
+                  return muted ? 'mdi:volume-off' : 'mdi:volume-high';
+                ]]]
+              show_name: false
+              styles:
+                card:
+                  - height: 34px
+                  - width: 46px
+                  - border-radius: 999px
+                  - box-shadow: none
+                  - border: 1px solid var(--divider-color)
+                icon:
+                  - width: 20px
+                  - color: |
+                      [[[
+                        const muted = states[variables.mp_entity]?.attributes?.is_volume_muted;
+                        return muted ? 'crimson' : 'var(--primary-text-color)';
+                      ]]]
+              tap_action:
+                action: call-service
+                service: media_player.volume_mute
+                service_data:
+                  entity_id: '[[[ return variables.mp_entity ]]]'
+                  is_volume_muted: |
+                    [[[
+                      const muted = states[variables.mp_entity]?.attributes?.is_volume_muted;
+                      return !muted;
+                    ]]]
+views:
+  - title: House Music (Phone)
+    path: rti-house-music-phone
+    badges: []
+    cards:
+      - type: custom:button-card
+        template: rti_all_off_both
+        variables:
+          label: All Zones Off — Both Amps
+          entities:
+            - switch.rti_ad_8x_amp1_kitchen_power
+            - switch.rti_ad_8x_amp1_great_room_power
+            - switch.rti_ad_8x_amp1_upper_deck_power
+            - switch.rti_ad_8x_amp1_master_bed_power
+            - switch.rti_ad_8x_amp1_master_bath_power
+            - switch.rti_ad_8x_amp1_mom_s_room_power
+            - switch.rti_ad_8x_amp1_office_power
+            - switch.rti_ad_8x_amp1_craft_room_power
+            - switch.rti_ad_8x_amp2_laundry_power
+            - switch.rti_ad_8x_amp2_lower_bar_power
+            - switch.rti_ad_8x_amp2_golf_room_power
+            - switch.rti_ad_8x_amp2_lower_guest_power
+            - switch.rti_ad_8x_amp2_fitness_power
+            - switch.rti_ad_8x_amp2_walkout_power
+            - switch.rti_ad_8x_amp2_pool_power
+            - switch.rti_ad_8x_amp2_patio_power
+      - type: media-control
+        entity: media_player.sonos_1
+        name: Sonos 1
+      - type: media-control
+        entity: media_player.sonos_2
+        name: Sonos 2
+      - type: grid
+        square: false
+        columns: 1
+        cards:
+          - type: custom:button-card
+            template: rti_zone_row_compact
+            entity: switch.rti_ad_8x_amp1_kitchen_power
+            variables:
+              zone_name: Kitchen
+              source_entity: select.rti_ad_8x_amp1_kitchen_source
+              volume_entity: number.rti_ad_8x_amp1_kitchen_volume
+          - type: custom:button-card
+            template: rti_zone_row_compact
+            entity: switch.rti_ad_8x_amp1_great_room_power
+            variables:
+              zone_name: Great Room
+              source_entity: select.rti_ad_8x_amp1_great_room_source
+              volume_entity: number.rti_ad_8x_amp1_great_room_volume
+          - type: custom:button-card
+            template: rti_zone_row_compact
+            entity: switch.rti_ad_8x_amp1_upper_deck_power
+            variables:
+              zone_name: Upper Deck
+              source_entity: select.rti_ad_8x_amp1_upper_deck_source
+              volume_entity: number.rti_ad_8x_amp1_upper_deck_volume
+          - type: custom:button-card
+            template: rti_zone_row_compact
+            entity: switch.rti_ad_8x_amp1_master_bed_power
+            variables:
+              zone_name: Master Bed
+              source_entity: select.rti_ad_8x_amp1_master_bed_source
+              volume_entity: number.rti_ad_8x_amp1_master_bed_volume
+          - type: custom:button-card
+            template: rti_zone_row_compact
+            entity: switch.rti_ad_8x_amp1_master_bath_power
+            variables:
+              zone_name: Master Bath
+              source_entity: select.rti_ad_8x_amp1_master_bath_source
+              volume_entity: number.rti_ad_8x_amp1_master_bath_volume
+          - type: custom:button-card
+            template: rti_zone_row_compact
+            entity: switch.rti_ad_8x_amp1_mom_s_room_power
+            variables:
+              zone_name: Mom's Room
+              source_entity: select.rti_ad_8x_amp1_mom_s_room_source
+              volume_entity: number.rti_ad_8x_amp1_mom_s_room_volume
+          - type: custom:button-card
+            template: rti_zone_row_compact
+            entity: switch.rti_ad_8x_amp1_office_power
+            variables:
+              zone_name: Office
+              source_entity: select.rti_ad_8x_amp1_office_source
+              volume_entity: number.rti_ad_8x_amp1_office_volume
+          - type: custom:button-card
+            template: rti_zone_row_compact
+            entity: switch.rti_ad_8x_amp1_craft_room_power
+            variables:
+              zone_name: Craft Room
+              source_entity: select.rti_ad_8x_amp1_craft_room_source
+              volume_entity: number.rti_ad_8x_amp1_craft_room_volume
+          - type: custom:button-card
+            template: rti_zone_row_compact
+            entity: switch.rti_ad_8x_amp2_laundry_power
+            variables:
+              zone_name: Laundry
+              source_entity: select.rti_ad_8x_amp2_laundry_source
+              volume_entity: number.rti_ad_8x_amp2_laundry_volume
+          - type: custom:button-card
+            template: rti_zone_row_compact
+            entity: switch.rti_ad_8x_amp2_lower_bar_power
+            variables:
+              zone_name: Lower Bar
+              source_entity: select.rti_ad_8x_amp2_lower_bar_source
+              volume_entity: number.rti_ad_8x_amp2_lower_bar_volume
+          - type: custom:button-card
+            template: rti_zone_row_compact
+            entity: switch.rti_ad_8x_amp2_golf_room_power
+            variables:
+              zone_name: Golf Room
+              source_entity: select.rti_ad_8x_amp2_golf_room_source
+              volume_entity: number.rti_ad_8x_amp2_golf_room_volume
+          - type: custom:button-card
+            template: rti_zone_row_compact
+            entity: switch.rti_ad_8x_amp2_lower_guest_power
+            variables:
+              zone_name: Lower Guest
+              source_entity: select.rti_ad_8x_amp2_lower_guest_source
+              volume_entity: number.rti_ad_8x_amp2_lower_guest_volume
+          - type: custom:button-card
+            template: rti_zone_row_compact
+            entity: switch.rti_ad_8x_amp2_fitness_power
+            variables:
+              zone_name: Fitness
+              source_entity: select.rti_ad_8x_amp2_fitness_source
+              volume_entity: number.rti_ad_8x_amp2_fitness_volume
+          - type: custom:button-card
+            template: rti_zone_row_compact
+            entity: switch.rti_ad_8x_amp2_walkout_power
+            variables:
+              zone_name: Walkout
+              source_entity: select.rti_ad_8x_amp2_walkout_source
+              volume_entity: number.rti_ad_8x_amp2_walkout_volume
+          - type: custom:button-card
+            template: rti_zone_row_compact
+            entity: switch.rti_ad_8x_amp2_pool_power
+            variables:
+              zone_name: Pool
+              source_entity: select.rti_ad_8x_amp2_pool_source
+              volume_entity: number.rti_ad_8x_amp2_pool_volume
+          - type: custom:button-card
+            template: rti_zone_row_compact
+            entity: switch.rti_ad_8x_amp2_patio_power
+            variables:
+              zone_name: Patio
+              source_entity: select.rti_ad_8x_amp2_patio_source
+              volume_entity: number.rti_ad_8x_amp2_patio_volume
+      - type: markdown
+        content: '### Quick Sonos Volume'
+      - type: grid
+        square: false
+        columns: 1
+        cards:
+          - type: custom:button-card
+            template: sonos_quick_row
+            variables:
+              mp_entity: media_player.bedroom
+              label: Bedroom
+          - type: custom:button-card
+            template: sonos_quick_row
+            variables:
+              mp_entity: media_player.basement_sonos
+              label: Basement
+          - type: custom:button-card
+            template: sonos_quick_row
+            variables:
+              mp_entity: media_player.move_2
+              label: Move 2
+          - type: custom:button-card
+            template: sonos_quick_row
+            variables:
+              mp_entity: media_player.sonos_roam
+              label: Roam
+          - type: custom:button-card
+            template: sonos_quick_row
+            variables:
+              mp_entity: media_player.family_room
+              label: Family Room
+      - type: markdown
+        content: '### Sonos'
+      - type: grid
+        square: false
+        columns: 1
+        cards:
+          - type: media-control
+            entity: media_player.bedroom
+            name: Bedroom
+          - type: media-control
+            entity: media_player.basement_sonos
+            name: Basement
+          - type: media-control
+            entity: media_player.move_2
+            name: Move 2
+          - type: media-control
+            entity: media_player.sonos_roam
+            name: Roam
+          - type: media-control
+            entity: media_player.family_room
+            name: Family Room

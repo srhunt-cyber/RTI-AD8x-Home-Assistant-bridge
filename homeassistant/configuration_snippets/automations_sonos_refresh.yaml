@@ -1,0 +1,18 @@
+- alias: Sonos Favorites → Refresh on HA Start
+  id: sonos_favorites_refresh_on_ha_start
+  mode: restart
+  trigger: [{ platform: homeassistant, event: start }]
+  action:
+    - wait_template: >
+        {{ states.media_player | selectattr('attributes.source_list','defined') | list | length > 0 }}
+      timeout: "00:02:00"
+      continue_on_timeout: true
+    - delay: "00:00:05"
+    - service: pyscript.sonos_refresh_favorites_1
+
+- alias: Sonos Favorites → Refresh every 3h
+  id: sonos_favorites_refresh_every_3h
+  mode: single
+  trigger: [{ platform: time_pattern, hours: "/3" }]
+  action:
+    - service: pyscript.sonos_refresh_favorites_1
