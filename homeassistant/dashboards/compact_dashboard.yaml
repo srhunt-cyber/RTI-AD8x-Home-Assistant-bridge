@@ -41,7 +41,7 @@ button_card_templates:
                   [[[
                     return entity.state === 'on'
                       ? 'var(--primary-color)'
-                                              : 'var(--disabled-text-color)';
+                      : 'var(--disabled-text-color)';
                   ]]]
       source:
         card:
@@ -601,7 +601,7 @@ views:
         content: '## Sonos Volume'
       - type: custom:button-card
         color_type: label-card
-        name: Mute
+        show_name: false
         styles:
           card:
             - padding: 0 12px
@@ -609,17 +609,21 @@ views:
             - grid-template-areas: '"m n v"'
             - grid-template-columns: 40px 1fr auto
             - column-gap: 5px
-          name:
-            - justify-self: start
           custom_fields:
+            m:
+              - justify-self: start
+              - font-weight: 600
+              - font-size: 12px
             'n':
               - justify-self: start
               - font-weight: 600
+              - font-size: 12px
             v:
-              - justify-self: end
+              - justify-self: center
               - font-weight: 600
-              - margin-right: 25px
+              - font-size: 12px
         custom_fields:
+          m: Mute
           'n': Speaker
           v: Volume
       - type: vertical-stack
