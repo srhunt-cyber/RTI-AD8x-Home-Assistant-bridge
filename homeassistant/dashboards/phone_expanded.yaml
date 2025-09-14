@@ -58,30 +58,36 @@ button_card_templates:
           - color: var(--secondary-text-color)
     tap_action:
       action: call-service
-      service: homeassistant.turn_off
+      service: mqtt.publish
+      service_data:
+        topic: rti/ad8x/all/set/all_off
+        payload: '1'
       confirmation:
         text: Turn **off all zones** on both amps?
-      service_data:
-        entity_id: '[[[ return variables.entities ]]]'
   rti_zone_row_compact:
+    triggers_update: all
     variables:
       zone_name: ''
       source_entity: ''
       volume_entity: ''
-      volume_min: 0
-      volume_max: 75
-      volume_step: 2
+      bass_entity: ''
+      treble_entity: ''
+      amp_key: ''
+      zone_num: 0
+      volume_step: 1
     show_icon: false
     show_name: true
     styles:
       grid:
         - grid-template-areas: |
-            "n    n"
-            "source power"
-            "volume volume"
-        - grid-template-columns: 1fr auto
-        - grid-template-rows: auto auto auto
+            "n n n n"
+            "source_label source_1 source_2 power"
+            "volume volume volume volume"
+            "tone tone tone tone"
+        - grid-template-columns: auto 32px 32px 1fr
+        - grid-template-rows: auto auto auto auto
         - row-gap: 4px
+        - column-gap: 6px
       card:
         - padding: 6px 8px
         - border-radius: 12px
@@ -100,94 +106,115 @@ button_card_templates:
         - font-weight: 800
         - font-size: 16px
         - padding: 0
+      custom_fields:
+        power:
+          - justify-self: end
+        source_1:
+          - align-self: center
+        source_2:
+          - align-self: center
     name: '[[[ return variables.zone_name ]]]'
     custom_fields:
-      source:
+      source_label:
         card:
-          type: horizontal-stack
-          cards:
-            - type: custom:button-card
-              name: 'Sonos:'
-              show_icon: false
-              styles:
-                card:
-                  - padding: 0
-                  - margin-right: 6px
-                  - box-shadow: none
-                  - background: none
-                  - border: none
-                  - height: 26px
-                name:
-                  - font-size: 13px
-                  - font-weight: 700
-                  - align-self: center
-              tap_action:
-                action: none
-            - type: custom:button-card
-              name: '1'
-              show_icon: false
-              styles:
-                card:
-                  - height: 26px
-                  - width: 26px
-                  - border-radius: 999px
-                  - font-size: 13px
-                  - padding: 0
-                  - box-shadow: none
-                  - border: |
-                      [[[
-                        const on = states[variables.source_entity]?.state === '1';
-                        return on ? '2px solid seagreen' : '1px solid var(--divider-color)';
-                      ]]]
-                  - background: |
-                      [[[
-                        const on = states[variables.source_entity]?.state === '1';
-                        return on ? 'rgba(46,139,87,0.18)' : 'transparent';
-                      ]]]
-                  - color: |
-                      [[[
-                        const on = states[variables.source_entity]?.state === '1'
-                          ? 'seagreen' : 'var(--primary-text-color)';
-                      ]]]
-              tap_action:
-                action: call-service
-                service: select.select_option
-                service_data:
-                  entity_id: '[[[ return variables.source_entity ]]]'
-                  option: '1'
-            - type: custom:button-card
-              name: '2'
-              show_icon: false
-              styles:
-                card:
-                  - height: 26px
-                  - width: 26px
-                  - border-radius: 999px
-                  - font-size: 13px
-                  - padding: 0
-                  - margin-left: 6px
-                  - box-shadow: none
-                  - border: |
-                      [[[
-                        const on = states[variables.source_entity]?.state === '2';
-                        return on ? '2px solid seagreen' : '1px solid var(--divider-color)';
-                      ]]]
-                  - background: |
-                      [[[
-                        const on = states[variables.source_entity]?.state === '2';
-                        return on ? 'rgba(46,139,87,0.18)' : 'transparent';
-                      ]]]
-                  - color: |
-                      [[[
-                        const on = states[variables.source_entity]?.state === '2'
-                          ? 'seagreen' : 'var(--primary-text-color)';
-                      ]]]
-              tap_action:
-                action: call-service
-                service: select.select_option
-                service_data:
-                  entity_id: '[[[ return variables.source_entity ]]]'
-                  option: '2'
+          type: custom:button-card
+          name: 'Sonos:'
+          show_icon: false
+          styles:
+            card:
+              - padding: 0
+              - box-shadow: none
+              - background: none
+              - border: none
+              - height: 26px
+            name:
+              - font-size: 13px
+              - font-weight: 700
+              - align-self: center
+          tap_action:
+            action: none
+      source_1:
+        card:
+          type: custom:button-card
+          entity: '[[[ return entity.entity_id ]]]'
+          name: '1'
+          show_icon: false
+          styles:
+            card:
+              - height: 26px
+              - width: 26px
+              - border-radius: 999px
+              - font-size: 13px
+              - padding: 0
+              - box-shadow: none
+              - border: |
+                  [[[
+                    const source = states[variables.source_entity];
+                    return (source && source.state == '1')
+                      ? '2px solid seagreen'
+                      : '1px solid var(--divider-color)';
+                  ]]]
+              - background: |
+                  [[[
+                    const source = states[variables.source_entity];
+                    return (source && source.state == '1')
+                      ? 'rgba(46,139,87,0.18)'
+                      : 'transparent';
+                  ]]]
+              - color: |
+                  [[[
+                    const source = states[variables.source_entity];
+                    return (source && source.state == '1')
+                      ? 'seagreen'
+                      : 'var(--primary-text-color)';
+                  ]]]
+          tap_action:
+            action: call-service
+            service: select.select_option
+            service_data:
+              entity_id: '[[[ return variables.source_entity ]]]'
+              option: '1'
+      source_2:
+        card:
+          type: custom:button-card
+          entity: '[[[ return entity.entity_id ]]]'
+          name: '2'
+          show_icon: false
+          styles:
+            card:
+              - height: 26px
+              - width: 26px
+              - border-radius: 999px
+              - font-size: 13px
+              - padding: 0
+              - box-shadow: none
+              - border: |
+                  [[[
+                    const source = states[variables.source_entity];
+                    return (source && source.state == '2')
+                      ? '2px solid seagreen'
+                      : '1px solid var(--divider-color)';
+                  ]]]
+              - background: |
+                  [[[
+                    const source = states[variables.source_entity];
+                    return (source && source.state == '2')
+                      ? 'rgba(46,139,87,0.18)'
+                      : 'transparent';
+                  ]]]
+              - color: |
+                  [[[
+                    const source = states[variables.source_entity];
+                    return (source && source.state == '2')
+                      ? 'seagreen'
+                      : 'var(--primary-text-color)';
+                  ]]]
+          tap_action:
+            action: call-service
+            service: select.select_option
+            service_data:
+              entity_id: '[[[ return variables.source_entity ]]]'
+              option: '2'
       power:
         card:
           type: entities
@@ -199,15 +226,10 @@ button_card_templates:
           card_mod:
             style: >
               ha-card { box-shadow: none; background: none; padding: 0; }
-
-              .mdc-list { padding: 0; }
-
-              .mdc-list-item { min-height: 28px; padding: 0; }
-
-              .mdc-list-item__graphic, .secondary { display: none; }
-
-              .mdc-list-item__primary-text { font-weight: 700; font-size: 13px;
-              }
+              .mdc-list { padding: 0; } .mdc-list-item { min-height: 28px;
+              padding: 0; } .mdc-list-item__graphic, .secondary { display: none;
+              } .mdc-list-item__primary-text { font-weight: 700; font-size:
+              13px; }
       volume:
         card:
           type: conditional
@@ -235,43 +257,42 @@ button_card_templates:
                     entity_id: '[[[ return variables.volume_entity ]]]'
                     value: |
                       [[[
-                        const cur = Number(states[variables.volume_entity]?.state || 0);
-                        const step = Number(variables.volume_step || 2);
-                        const min = Number(variables.volume_min ?? 0);
-                        return Math.max(min, cur - step);
+                        const e = variables.volume_entity;
+                        const cur = Number(states[e]?.state ?? 0);
+                        const step = variables.volume_step || 1;
+                        const next = Math.max(0, cur - step);
+                        return next;
                       ]]]
                 hold_action:
                   action: call-service
-                  repeat: 300
+                  repeat: 400
                   service: number.set_value
                   service_data:
                     entity_id: '[[[ return variables.volume_entity ]]]'
                     value: |
                       [[[
-                        const cur = Number(states[variables.volume_entity]?.state || 0);
-                        const step = Number(variables.volume_step || 2);
-                        const min = Number(variables.volume_min ?? 0);
-                        return Math.max(min, cur - step);
+                        const e = variables.volume_entity;
+                        const cur = Number(states[e]?.state ?? 0);
+                        const step = variables.volume_step || 1;
+                        const next = Math.max(0, cur - step);
+                        return next;
                       ]]]
               - type: entities
                 show_header_toggle: false
                 entities:
                   - type: custom:slider-entity-row
                     entity: '[[[ return variables.volume_entity ]]]'
-                    name: ''
-                    min: '[[[ return variables.volume_min ?? 0 ]]]'
-                    max: '[[[ return variables.volume_max ?? 75 ]]]'
-                    step: '[[[ return variables.volume_step ?? 2 ]]]'
-                    full_row: true
+                    name: Volume
+                    min: 0
+                    max: 75
+                    step: '[[[ return variables.volume_step || 1; ]]]'
                     grow: true
                     hide_state: false
                     hide_when_off: true
                 card_mod:
                   style: >
                     ha-card { box-shadow: none; padding: 0 4px; background:
-                    none; }
-
-                    .mdc-slider { height: 20px; }
+                    none; } .mdc-slider { height: 20px; }
               - type: custom:button-card
                 name: +
                 show_icon: false
@@ -290,24 +311,215 @@ button_card_templates:
                     entity_id: '[[[ return variables.volume_entity ]]]'
                     value: |
                       [[[
-                        const cur = Number(states[variables.volume_entity]?.state || 0);
-                        const step = Number(variables.volume_step || 2);
-                        const max = Number(variables.volume_max ?? 75);
-                        return Math.min(max, cur + step);
+                        const e = variables.volume_entity;
+                        const cur = Number(states[e]?.state ?? 0);
+                        const step = variables.volume_step || 1;
+                        const next = Math.min(75, cur + step);
+                        return next;
                       ]]]
                 hold_action:
                   action: call-service
-                  repeat: 300
+                  repeat: 400
                   service: number.set_value
                   service_data:
                     entity_id: '[[[ return variables.volume_entity ]]]'
                     value: |
                       [[[
-                        const cur = Number(states[variables.volume_entity]?.state || 0);
-                        const step = Number(variables.volume_step || 2);
-                        const max = Number(variables.volume_max ?? 75);
-                        return Math.min(max, cur + step);
+                        const e = variables.volume_entity;
+                        const cur = Number(states[e]?.state ?? 0);
+                        const step = variables.volume_step || 1;
+                        const next = Math.min(75, cur + step);
+                        return next;
                       ]]]
+      tone:
+        card:
+          type: conditional
+          conditions:
+            - entity: '[[[ return entity.entity_id ]]]'
+              state: 'on'
+          card:
+            type: vertical-stack
+            cards:
+              - type: horizontal-stack
+                cards:
+                  - type: custom:button-card
+                    name: −
+                    show_icon: false
+                    styles:
+                      card:
+                        - height: 30px
+                        - width: 46px
+                        - border-radius: 999px
+                        - font-size: 18px
+                        - box-shadow: none
+                        - border: 1px solid var(--divider-color)
+                    tap_action:
+                      action: call-service
+                      service: number.set_value
+                      service_data:
+                        entity_id: '[[[ return variables.bass_entity ]]]'
+                        value: |
+                          [[[
+                            const e = variables.bass_entity;
+                            const cur = Number(states[e]?.state ?? 0);
+                            const next = Math.max(-12, cur - 2);
+                            return next;
+                          ]]]
+                    hold_action:
+                      action: call-service
+                      repeat: 400
+                      service: number.set_value
+                      service_data:
+                        entity_id: '[[[ return variables.bass_entity ]]]'
+                        value: |
+                          [[[
+                            const e = variables.bass_entity;
+                            const cur = Number(states[e]?.state ?? 0);
+                            const next = Math.max(-12, cur - 2);
+                            return next;
+                          ]]]
+                  - type: entities
+                    show_header_toggle: false
+                    entities:
+                      - type: custom:slider-entity-row
+                        entity: '[[[ return variables.bass_entity ]]]'
+                        name: Bass
+                        min: -12
+                        max: 12
+                        step: 2
+                        grow: true
+                        hide_state: false
+                        hide_when_off: true
+                    card_mod:
+                      style: >
+                        ha-card { box-shadow: none; padding: 0 4px; background:
+                        none; } .mdc-slider { height: 20px; }
+                  - type: custom:button-card
+                    name: +
+                    show_icon: false
+                    styles:
+                      card:
+                        - height: 30px
+                        - width: 46px
+                        - border-radius: 999px
+                        - font-size: 18px
+                        - box-shadow: none
+                        - border: 1px solid var(--divider-color)
+                    tap_action:
+                      action: call-service
+                      service: number.set_value
+                      service_data:
+                        entity_id: '[[[ return variables.bass_entity ]]]'
+                        value: |
+                          [[[
+                            const e = variables.bass_entity;
+                            const cur = Number(states[e]?.state ?? 0);
+                            const next = Math.min(12, cur + 2);
+                            return next;
+                          ]]]
+                    hold_action:
+                      action: call-service
+                      repeat: 400
+                      service: number.set_value
+                      service_data:
+                        entity_id: '[[[ return variables.bass_entity ]]]'
+                        value: |
+                          [[[
+                            const e = variables.bass_entity;
+                            const cur = Number(states[e]?.state ?? 0);
+                            const next = Math.min(12, cur + 2);
+                            return next;
+                          ]]]
+              - type: horizontal-stack
+                cards:
+                  - type: custom:button-card
+                    name: −
+                    show_icon: false
+                    styles:
+                      card:
+                        - height: 30px
+                        - width: 46px
+                        - border-radius: 999px
+                        - font-size: 18px
+                        - box-shadow: none
+                        - border: 1px solid var(--divider-color)
+                    tap_action:
+                      action: call-service
+                      service: number.set_value
+                      service_data:
+                        entity_id: '[[[ return variables.treble_entity ]]]'
+                        value: |
+                          [[[
+                            const e = variables.treble_entity;
+                            const cur = Number(states[e]?.state ?? 0);
+                            const next = Math.max(-12, cur - 2);
+                            return next;
+                          ]]]
+                    hold_action:
+                      action: call-service
+                      repeat: 400
+                      service: number.set_value
+                      service_data:
+                        entity_id: '[[[ return variables.treble_entity ]]]'
+                        value: |
+                          [[[
+                            const e = variables.treble_entity;
+                            const cur = Number(states[e]?.state ?? 0);
+                            const next = Math.max(-12, cur - 2);
+                            return next;
+                          ]]]
+                  - type: entities
+                    show_header_toggle: false
+                    entities:
+                      - type: custom:slider-entity-row
+                        entity: '[[[ return variables.treble_entity ]]]'
+                        name: Treble
+                        min: -12
+                        max: 12
+                        step: 2
+                        grow: true
+                        hide_state: false
+                        hide_when_off: true
+                    card_mod:
+                      style: >
+                        ha-card { box-shadow: none; padding: 0 4px; background:
+                        none; } .mdc-slider { height: 20px; }
+                  - type: custom:button-card
+                    name: +
+                    show_icon: false
+                    styles:
+                      card:
+                        - height: 30px
+                        - width: 46px
+                        - border-radius: 999px
+                        - font-size: 18px
+                        - box-shadow: none
+                        - border: 1px solid var(--divider-color)
+                    tap_action:
+                      action: call-service
+                      service: number.set_value
+                      service_data:
+                        entity_id: '[[[ return variables.treble_entity ]]]'
+                        value: |
+                          [[[
+                            const e = variables.treble_entity;
+                            const cur = Number(states[e]?.state ?? 0);
+                            const next = Math.min(12, cur + 2);
+                            return next;
+                          ]]]
+                    hold_action:
+                      action: call-service
+                      repeat: 400
+                      service: number.set_value
+                      service_data:
+                        entity_id: '[[[ return variables.treble_entity ]]]'
+                        value: |
+                          [[[
+                            const e = variables.treble_entity;
+                            const cur = Number(states[e]?.state ?? 0);
+                            const next = Math.min(12, cur + 2);
+                            return next;
+                          ]]]
   sonos_quick_row:
     variables:
       mp_entity: ''
@@ -467,6 +679,10 @@ views:
               zone_name: Kitchen
               source_entity: select.rti_ad_8x_amp1_kitchen_source
               volume_entity: number.rti_ad_8x_amp1_kitchen_volume
+              bass_entity: number.rti_ad_8x_amp1_kitchen_bass
+              treble_entity: number.rti_ad_8x_amp1_kitchen_treble
+              amp_key: amp1
+              zone_num: 1
           - type: custom:button-card
             template: rti_zone_row_compact
             entity: switch.rti_ad_8x_amp1_great_room_power
@@ -474,6 +690,10 @@ views:
               zone_name: Great Room
               source_entity: select.rti_ad_8x_amp1_great_room_source
               volume_entity: number.rti_ad_8x_amp1_great_room_volume
+              bass_entity: number.rti_ad_8x_amp1_great_room_bass
+              treble_entity: number.rti_ad_8x_amp1_great_room_treble
+              amp_key: amp1
+              zone_num: 2
           - type: custom:button-card
             template: rti_zone_row_compact
             entity: switch.rti_ad_8x_amp1_upper_deck_power
@@ -481,6 +701,10 @@ views:
               zone_name: Upper Deck
               source_entity: select.rti_ad_8x_amp1_upper_deck_source
               volume_entity: number.rti_ad_8x_amp1_upper_deck_volume
+              bass_entity: number.rti_ad_8x_amp1_upper_deck_bass
+              treble_entity: number.rti_ad_8x_amp1_upper_deck_treble
+              amp_key: amp1
+              zone_num: 3
           - type: custom:button-card
             template: rti_zone_row_compact
             entity: switch.rti_ad_8x_amp1_master_bed_power
@@ -488,6 +712,10 @@ views:
               zone_name: Master Bed
               source_entity: select.rti_ad_8x_amp1_master_bed_source
               volume_entity: number.rti_ad_8x_amp1_master_bed_volume
+              bass_entity: number.rti_ad_8x_amp1_master_bed_bass
+              treble_entity: number.rti_ad_8x_amp1_master_bed_treble
+              amp_key: amp1
+              zone_num: 4
           - type: custom:button-card
             template: rti_zone_row_compact
             entity: switch.rti_ad_8x_amp1_master_bath_power
@@ -495,6 +723,10 @@ views:
               zone_name: Master Bath
               source_entity: select.rti_ad_8x_amp1_master_bath_source
               volume_entity: number.rti_ad_8x_amp1_master_bath_volume
+              bass_entity: number.rti_ad_8x_amp1_master_bath_bass
+              treble_entity: number.rti_ad_8x_amp1_master_bath_treble
+              amp_key: amp1
+              zone_num: 5
           - type: custom:button-card
             template: rti_zone_row_compact
             entity: switch.rti_ad_8x_amp1_mom_s_room_power
@@ -502,6 +734,10 @@ views:
               zone_name: Mom's Room
               source_entity: select.rti_ad_8x_amp1_mom_s_room_source
               volume_entity: number.rti_ad_8x_amp1_mom_s_room_volume
+              bass_entity: number.rti_ad_8x_amp1_mom_s_room_bass
+              treble_entity: number.rti_ad_8x_amp1_mom_s_room_treble
+              amp_key: amp1
+              zone_num: 6
           - type: custom:button-card
             template: rti_zone_row_compact
             entity: switch.rti_ad_8x_amp1_office_power
@@ -509,6 +745,10 @@ views:
               zone_name: Office
               source_entity: select.rti_ad_8x_amp1_office_source
               volume_entity: number.rti_ad_8x_amp1_office_volume
+              bass_entity: number.rti_ad_8x_amp1_office_bass
+              treble_entity: number.rti_ad_8x_amp1_office_treble
+              amp_key: amp1
+              zone_num: 7
           - type: custom:button-card
             template: rti_zone_row_compact
             entity: switch.rti_ad_8x_amp1_craft_room_power
@@ -516,6 +756,10 @@ views:
               zone_name: Craft Room
               source_entity: select.rti_ad_8x_amp1_craft_room_source
               volume_entity: number.rti_ad_8x_amp1_craft_room_volume
+              bass_entity: number.rti_ad_8x_amp1_craft_room_bass
+              treble_entity: number.rti_ad_8x_amp1_craft_room_treble
+              amp_key: amp1
+              zone_num: 8
           - type: custom:button-card
             template: rti_zone_row_compact
             entity: switch.rti_ad_8x_amp2_laundry_power
@@ -523,6 +767,10 @@ views:
               zone_name: Laundry
               source_entity: select.rti_ad_8x_amp2_laundry_source
               volume_entity: number.rti_ad_8x_amp2_laundry_volume
+              bass_entity: number.rti_ad_8x_amp2_laundry_bass
+              treble_entity: number.rti_ad_8x_amp2_laundry_treble
+              amp_key: amp2
+              zone_num: 1
           - type: custom:button-card
             template: rti_zone_row_compact
             entity: switch.rti_ad_8x_amp2_lower_bar_power
@@ -530,6 +778,10 @@ views:
               zone_name: Lower Bar
               source_entity: select.rti_ad_8x_amp2_lower_bar_source
               volume_entity: number.rti_ad_8x_amp2_lower_bar_volume
+              bass_entity: number.rti_ad_8x_amp2_lower_bar_bass
+              treble_entity: number.rti_ad_8x_amp2_lower_bar_treble
+              amp_key: amp2
+              zone_num: 2
           - type: custom:button-card
             template: rti_zone_row_compact
             entity: switch.rti_ad_8x_amp2_golf_room_power
@@ -537,6 +789,10 @@ views:
               zone_name: Golf Room
               source_entity: select.rti_ad_8x_amp2_golf_room_source
               volume_entity: number.rti_ad_8x_amp2_golf_room_volume
+              bass_entity: number.rti_ad_8x_amp2_golf_room_bass
+              treble_entity: number.rti_ad_8x_amp2_golf_room_treble
+              amp_key: amp2
+              zone_num: 3
           - type: custom:button-card
             template: rti_zone_row_compact
             entity: switch.rti_ad_8x_amp2_lower_guest_power
@@ -544,6 +800,10 @@ views:
               zone_name: Lower Guest
               source_entity: select.rti_ad_8x_amp2_lower_guest_source
               volume_entity: number.rti_ad_8x_amp2_lower_guest_volume
+              bass_entity: number.rti_ad_8x_amp2_lower_guest_bass
+              treble_entity: number.rti_ad_8x_amp2_lower_guest_treble
+              amp_key: amp2
+              zone_num: 4
           - type: custom:button-card
             template: rti_zone_row_compact
             entity: switch.rti_ad_8x_amp2_fitness_power
@@ -551,6 +811,10 @@ views:
               zone_name: Fitness
               source_entity: select.rti_ad_8x_amp2_fitness_source
               volume_entity: number.rti_ad_8x_amp2_fitness_volume
+              bass_entity: number.rti_ad_8x_amp2_fitness_bass
+              treble_entity: number.rti_ad_8x_amp2_fitness_treble
+              amp_key: amp2
+              zone_num: 5
           - type: custom:button-card
             template: rti_zone_row_compact
             entity: switch.rti_ad_8x_amp2_walkout_power
@@ -558,6 +822,10 @@ views:
               zone_name: Walkout
               source_entity: select.rti_ad_8x_amp2_walkout_source
               volume_entity: number.rti_ad_8x_amp2_walkout_volume
+              bass_entity: number.rti_ad_8x_amp2_walkout_bass
+              treble_entity: number.rti_ad_8x_amp2_walkout_treble
+              amp_key: amp2
+              zone_num: 6
           - type: custom:button-card
             template: rti_zone_row_compact
             entity: switch.rti_ad_8x_amp2_pool_power
@@ -565,6 +833,10 @@ views:
               zone_name: Pool
               source_entity: select.rti_ad_8x_amp2_pool_source
               volume_entity: number.rti_ad_8x_amp2_pool_volume
+              bass_entity: number.rti_ad_8x_amp2_pool_bass
+              treble_entity: number.rti_ad_8x_amp2_pool_treble
+              amp_key: amp2
+              zone_num: 7
           - type: custom:button-card
             template: rti_zone_row_compact
             entity: switch.rti_ad_8x_amp2_patio_power
@@ -572,6 +844,10 @@ views:
               zone_name: Patio
               source_entity: select.rti_ad_8x_amp2_patio_source
               volume_entity: number.rti_ad_8x_amp2_patio_volume
+              bass_entity: number.rti_ad_8x_amp2_patio_bass
+              treble_entity: number.rti_ad_8x_amp2_patio_treble
+              amp_key: amp2
+              zone_num: 8
       - type: markdown
         content: '### Quick Sonos Volume'
       - type: grid
