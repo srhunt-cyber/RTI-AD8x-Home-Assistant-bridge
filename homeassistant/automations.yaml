@@ -73,7 +73,7 @@
     - condition: template
       value_template: >
         {{ this.attributes.last_triggered is none or
-           (now() - this.attributes.last_triggered).total_seconds() > 10 }}
+              (now() - this.attributes.last_triggered).total_seconds() > 10 }}
 
   action:
     - choose:
@@ -110,4 +110,27 @@
             - service: media_player.media_play
               target:
                 entity_id: "{{ target_player }}"
-                
+
+- alias: RTI Amps Network Reset
+  id: rti_amps_network_reset
+  description: Power cycles the network switch when either RTI amp's network freezes.
+  trigger:
+    - platform: mqtt
+      topic: rti/ad8x/network_status/amp1
+      payload: down
+    - platform: mqtt
+      topic: rti/ad8x/network_status/amp2
+      payload: down
+  action:
+    - service: system_log.write
+      data:
+        message: "RTI amp network freeze detected. Initiating power cycle of network switch."
+        level: warning
+    - service: switch.turn_off
+      target:
+        entity_id: switch.rti_amp
+    - delay: 5
+    - service: switch.turn_on
+      target:
+        entity_id: switch.rti_amp
+  mode: single
