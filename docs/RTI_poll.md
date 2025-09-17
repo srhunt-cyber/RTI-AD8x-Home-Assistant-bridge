@@ -262,5 +262,3 @@ v1.4.0 — Network Failover: Adds logic to detect amp network freezes and publis
 v1.1.x — iPhone-optimized dashboards noted. Template lights with safe volume clamp 5–40 (AD-8x scale 0–75). Documented tone-control latency + bridge-side smoothing suggestions. Discrete ± commands; fail-fast reconnects; global All Off.
 
 
-
-Gemini can make mistakes, so double-check it
