@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
 """
 RTI AD-8x <-> MQTT bridge
-Version 1.3.0 (2025-09-09)
+Version 1.4.0 (2025-09-16)
 
-- FINAL: This version is a direct upgrade to the trusted v0.3.0 codebase,
-  preserving the original formatting and line count while adding all new features.
+- This version is a direct upgrade to the trusted v0.3.0 codebase.
 - OPTIMISTIC UI: Added 'optimistic: True' to number entities (Volume, Bass, Treble)
   for an instantly responsive Home Assistant dashboard.
 - Corrected MQTT Discovery payloads for power and mute switches.
@@ -13,6 +12,9 @@ Version 1.3.0 (2025-09-09)
 - Per-zone Bass and Treble control via sliders in Home Assistant.
 - Discrete volume_up/volume_down commands for responsive buttons.
 - Global "All Off" command for instant shutdown.
+- NETWORK FAILOVER: The bridge now detects amp network failures after 3
+  consecutive missed polls and publishes a "down" message, enabling external
+  automations to power cycle the network switch.
 
 Install notes:
   sudo systemctl daemon-reload
@@ -116,6 +118,9 @@ class AmpSession(threading.Thread):
         self.last_fw = None
         self._last_heartbeat_ts = 0.0
         self._zone_states: dict[int, dict] = {}
+        # New network failure detection variables
+        self._consecutive_failures = 0
+        self._is_down_published = False
 
     def _connect(self) -> bool:
         self._close()
@@ -141,6 +146,9 @@ class AmpSession(threading.Thread):
     def _close(self):
         was = self.connected
         self.connected = False
+        # Reset failure counters on close
+        self._consecutive_failures = 0
+        self._is_down_published = False
         try:
             if self.sock: self.sock.close()
         finally:
@@ -312,7 +320,10 @@ class AmpSession(threading.Thread):
 
     def _poll_once(self):
         with self.lock:
-            if not self.connected and not self._connect(): return False
+            if not self.connected and not self._connect():
+                self._handle_poll_failure()
+                return False
+            
             try:
                 for z in range(1, 9):
                     self._send_ascii(f"*ZN{zz(z)}STA00"); time.sleep(INTER_CMD_SLEEP)
@@ -322,11 +333,37 @@ class AmpSession(threading.Thread):
                     sta_data, tone_data = parse_sta(sta_line), parse_tone(tone_line)
                     if not (sta_data and tone_data):
                         log.warning(f"[{self.amp_name}] poll failed for zone {zz(z)}, aborting poll and reconnecting.")
+                        self._handle_poll_failure()
                         return False
                     self._pub_zone_full(z, sta_data, tone_data)
-                self._pub_availability("online"); return True
+                
+                # If the entire poll succeeds
+                self._handle_poll_success()
+                self._pub_availability("online")
+                return True
             except Exception as e:
-                log.warning(f"[{self.amp_name}] poll error: {e}"); return False
+                log.warning(f"[{self.amp_name}] poll error: {e}")
+                self._handle_poll_failure()
+                return False
+
+    def _handle_poll_success(self):
+        """Resets failure counter on a successful poll."""
+        self._consecutive_failures = 0
+        if self._is_down_published:
+            log.info(f"[{self.amp_name}] Amp is back online. Resetting 'down' flag.")
+            self._is_down_published = False
+
+    def _handle_poll_failure(self):
+        """Increments failure counter and publishes 'down' message if threshold is met."""
+        self._consecutive_failures += 1
+        log.warning(f"[{self.amp_name}] Poll failed. Consecutive failures: {self._consecutive_failures}")
+        # Only publish the 'down' message once the threshold is met
+        # and it hasn't been published already for this outage.
+        if self._consecutive_failures >= 3 and not self._is_down_published:
+            log.error(f"[{self.amp_name}] Exceeded poll failure threshold. Publishing 'down' message.")
+            down_topic = f"{MQTT_BASE}/network_status/{self.amp_name}"
+            self.mqttc.publish(down_topic, "down", retain=True)
+            self._is_down_published = True
 
     def run(self):
         backoff = 1.0
@@ -441,4 +478,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
