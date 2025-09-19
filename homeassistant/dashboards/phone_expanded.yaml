@@ -60,8 +60,8 @@ button_card_templates:
       action: call-service
       service: mqtt.publish
       service_data:
-        topic: rti/ad8x/all/set/all_off
-        payload: '1'
+        topic: rti/ad8x/all/command
+        payload: 'OFF'
       confirmation:
         text: Turn **off all zones** on both amps?
   rti_zone_row_compact:
@@ -80,8 +80,8 @@ button_card_templates:
     styles:
       grid:
         - grid-template-areas: |
-            "n n n n"
-            "source_label source_1 source_2 power"
+            "n n n power"
+            "source_label source_1 source_2 ."
             "volume volume volume volume"
             "tone tone tone tone"
         - grid-template-columns: auto 32px 32px 1fr
@@ -217,19 +217,22 @@ button_card_templates:
               option: '2'
       power:
         card:
-          type: entities
-          show_header_toggle: false
-          entities:
-            - entity: '[[[ return entity.entity_id ]]]'
-              name: 'On/Off:'
-              icon: ''
-          card_mod:
-            style: >
-              ha-card { box-shadow: none; background: none; padding: 0; }
-              .mdc-list { padding: 0; } .mdc-list-item { min-height: 28px;
-              padding: 0; } .mdc-list-item__graphic, .secondary { display: none;
-              } .mdc-list-item__primary-text { font-weight: 700; font-size:
-              13px; }
+          type: custom:button-card
+          entity: '[[[ return entity.entity_id ]]]'
+          show_name: false
+          icon: mdi:power
+          styles:
+            card:
+              - height: 30px
+              - width: 30px
+              - border-radius: 999px
+              - box-shadow: none
+              - border: '[[[ return entity.state === "on" ? "2px solid seagreen" : "1px solid var(--divider-color)"; ]]]'
+              - background: '[[[ return entity.state === "on" ? "rgba(46,139,87,0.18)" : "transparent"; ]]]'
+            icon:
+              - color: '[[[ return entity.state === "on" ? "seagreen" : "var(--primary-text-color)"; ]]]'
+          tap_action:
+            action: toggle
       volume:
         card:
           type: conditional
@@ -290,9 +293,8 @@ button_card_templates:
                     hide_state: false
                     hide_when_off: true
                 card_mod:
-                  style: >
-                    ha-card { box-shadow: none; padding: 0 4px; background:
-                    none; } .mdc-slider { height: 20px; }
+                  style: |
+                    ha-card { box-shadow: none; padding: 0 4px; background: none; } .mdc-slider { height: 20px; }
               - type: custom:button-card
                 name: +
                 show_icon: false
@@ -391,9 +393,8 @@ button_card_templates:
                         hide_state: false
                         hide_when_off: true
                     card_mod:
-                      style: >
-                        ha-card { box-shadow: none; padding: 0 4px; background:
-                        none; } .mdc-slider { height: 20px; }
+                      style: |
+                        ha-card { box-shadow: none; padding: 0 4px; background: none; } .mdc-slider { height: 20px; }
                   - type: custom:button-card
                     name: +
                     show_icon: false
@@ -481,9 +482,8 @@ button_card_templates:
                         hide_state: false
                         hide_when_off: true
                     card_mod:
-                      style: >
-                        ha-card { box-shadow: none; padding: 0 4px; background:
-                        none; } .mdc-slider { height: 20px; }
+                      style: |
+                        ha-card { box-shadow: none; padding: 0 4px; background: none; } .mdc-slider { height: 20px; }
                   - type: custom:button-card
                     name: +
                     show_icon: false
