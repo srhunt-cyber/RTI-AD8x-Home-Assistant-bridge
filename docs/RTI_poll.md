@@ -154,6 +154,7 @@ Compact “At-a-Glance” Dashboard — Single-line status for all 16 zones + So
 UI prerequisites: HACS + custom:button-card (resource added as Module).
 
 📡 MQTT API
+
 State Topics (Bridge → MQTT)
 
 rti/ad8x/<amp>/zone/<zone>/power → on / off
@@ -172,19 +173,21 @@ rti/ad8x/<amp>/status → online / offline
 
 rti/ad8x/bridge/status → online / offline
 
-(NEW) rti/ad8x/network_status/<amp> → down
+rti/ad8x/network_status/<amp> → down
 
 Command Topics (MQTT → Bridge)
 
-rti/ad8x/all/set/all_off → 1
+rti/ad8x/all/command → OFF
 
 rti/ad8x/<amp>/zone/<zone>/set/power → on / off
 
-rti/ad8x/<amp>/zone/<zone>/set/mute → on / off / toggle
+rti/ad8x/<amp>/zone/<zone>/set/mute → on / off
+
+rti/ad8x/<amp>/zone/<zone>/set/toggle_mute
 
 rti/ad8x/<amp>/zone/<zone>/set/source → 1..8
 
-rti/ad8x/<amp>/zone/<zone>/set/volume → (0–75)
+rti/ad8x/<amp>/zone/<zone>/set/volume → 0–75
 
 rti/ad8x/<amp>/zone/<zone>/set/bass → -12..12
 
