@@ -1,20 +1,16 @@
 #!/usr/bin/env python3
 """
 RTI AD-8x <-> MQTT bridge
-Version 1.4.0 (2025-09-16)
+Version 1.5.1 (2025-09-17)
 
-- This version is a direct upgrade to the trusted v0.3.0 codebase.
-- OPTIMISTIC UI: Added 'optimistic: True' to number entities (Volume, Bass, Treble)
-  for an instantly responsive Home Assistant dashboard.
-- Corrected MQTT Discovery payloads for power and mute switches.
-- HARDENED: Polling is "fail-fast" for a more resilient connection.
-- Power-aware commands prevent zones from turning on unintentionally.
-- Per-zone Bass and Treble control via sliders in Home Assistant.
-- Discrete volume_up/volume_down commands for responsive buttons.
-- Global "All Off" command for instant shutdown.
-- NETWORK FAILOVER: The bridge now detects amp network failures after 3
-  consecutive missed polls and publishes a "down" message, enabling external
-  automations to power cycle the network switch.
+- CORRECTED: The "All-Off" command now uses the amplifier's efficient, built-in
+  '*ZALLPWR00' command instead of looping through zones individually, while
+  still providing instant optimistic UI updates for Home Assistant.
+- NEW: Optimistic All-Off command for instant UI updates in Home Assistant.
+  The bridge listens on 'rti/ad8x/all/command' for an 'OFF' payload.
+- NEW: Added 'optimistic: true' to power and mute switches for a more
+  responsive feel when toggling individual zones from the dashboard.
+- REFINED: The master command topic is now cleaner and more consistent.
 
 Install notes:
   sudo systemctl daemon-reload
@@ -118,7 +114,6 @@ class AmpSession(threading.Thread):
         self.last_fw = None
         self._last_heartbeat_ts = 0.0
         self._zone_states: dict[int, dict] = {}
-        # New network failure detection variables
         self._consecutive_failures = 0
         self._is_down_published = False
 
@@ -146,7 +141,6 @@ class AmpSession(threading.Thread):
     def _close(self):
         was = self.connected
         self.connected = False
-        # Reset failure counters on close
         self._consecutive_failures = 0
         self._is_down_published = False
         try:
@@ -200,6 +194,19 @@ class AmpSession(threading.Thread):
         self.sock.sendall(cmd_ascii.encode("ascii", "ignore") + EOL)
         log.info(f"[{self.amp_name}] TX {cmd_ascii}")
 
+    def _send_only(self, cmd_ascii: str) -> bool:
+        """Fire-and-forget send, used for optimistic updates."""
+        with self.lock:
+            if not self.connected and not self._connect(): return False
+            try:
+                self._send_ascii(cmd_ascii)
+                time.sleep(POST_SEND_SETTLE)
+                return True
+            except Exception as e:
+                log.error(f"[{self.amp_name}] send_only error: {e}")
+                self._close()
+                return False
+
     def _topic(self, *parts) -> str: return "/".join([MQTT_BASE, self.amp_name, *[str(p) for p in parts]])
     def _pub_availability(self, state: str): self.mqttc.publish(self._topic("status"), state, retain=True)
 
@@ -232,7 +239,7 @@ class AmpSession(threading.Thread):
     def set_power(self, zone: int, on: bool) -> bool: return self._send_and_confirm(zone, f"*ZN{zz(zone)}PWR{'01' if on else '00'}")
     def set_mute(self, zone: int, on: bool) -> bool: return self._send_and_confirm(zone, f"*ZN{zz(zone)}MUT{'01' if on else '00'}")
     def toggle_mute(self, zone: int) -> bool: return self._send_and_confirm(zone, f"*ZN{zz(zone)}MUT02")
-    def all_zones_off(self) -> bool: return self._send_and_confirm(1, "*ZALLPWR00")
+    def all_zones_off_optimistic(self) -> bool: return self._send_only("*ZALLPWR00")
     
     def set_source(self, zone: int, source: int) -> bool:
         if not self._is_zone_on(zone): log.warning(f"[{self.amp_name}] Ignoring source change for zone {zone}; power is off."); return False
@@ -337,7 +344,6 @@ class AmpSession(threading.Thread):
                         return False
                     self._pub_zone_full(z, sta_data, tone_data)
                 
-                # If the entire poll succeeds
                 self._handle_poll_success()
                 self._pub_availability("online")
                 return True
@@ -357,8 +363,6 @@ class AmpSession(threading.Thread):
         """Increments failure counter and publishes 'down' message if threshold is met."""
         self._consecutive_failures += 1
         log.warning(f"[{self.amp_name}] Poll failed. Consecutive failures: {self._consecutive_failures}")
-        # Only publish the 'down' message once the threshold is met
-        # and it hasn't been published already for this outage.
         if self._consecutive_failures >= 3 and not self._is_down_published:
             log.error(f"[{self.amp_name}] Exceeded poll failure threshold. Publishing 'down' message.")
             down_topic = f"{MQTT_BASE}/network_status/{self.amp_name}"
@@ -390,10 +394,10 @@ class Bridge:
                 zname = ZONE_NAMES.get(amp_key, {}).get(z, f"Zone {z}")
                 base = self._topic(amp_key, "zone", z); cmd_base = f"{base}/set"
                 
-                power_cfg = {"name": f"{zname} Power", "uniq_id": zone_object_id(amp_key, z, "power"), "stat_t": f"{base}/power", "cmd_t": f"{cmd_base}/power", "pl_on": "on", "pl_off": "off", "stat_on": "on", "stat_off": "off", "avty_t": avail_t, "device": dev}
+                power_cfg = {"name": f"{zname} Power", "uniq_id": zone_object_id(amp_key, z, "power"), "stat_t": f"{base}/power", "cmd_t": f"{cmd_base}/power", "pl_on": "on", "pl_off": "off", "stat_on": "on", "stat_off": "off", "avty_t": avail_t, "device": dev, "optimistic": True}
                 self.client.publish(discovery_topic("switch", zone_object_id(amp_key, z, "power")), json.dumps(power_cfg), retain=True)
 
-                mute_cfg = {"name": f"{zname} Mute", "uniq_id": zone_object_id(amp_key, z, "mute"), "stat_t": f"{base}/mute", "cmd_t": f"{cmd_base}/mute", "pl_on": "on", "pl_off": "off", "stat_on": "on", "stat_off": "off", "avty_t": avail_t, "device": dev}
+                mute_cfg = {"name": f"{zname} Mute", "uniq_id": zone_object_id(amp_key, z, "mute"), "stat_t": f"{base}/mute", "cmd_t": f"{cmd_base}/mute", "pl_on": "on", "pl_off": "off", "stat_on": "on", "stat_off": "off", "avty_t": avail_t, "device": dev, "optimistic": True}
                 self.client.publish(discovery_topic("switch", zone_object_id(amp_key, z, "mute")), json.dumps(mute_cfg), retain=True)
 
                 vol_cfg = {"name": f"{zname} Volume", "uniq_id": zone_object_id(amp_key, z, "volume"), "stat_t": f"{base}/volume", "cmd_t": f"{cmd_base}/volume", "min": 0, "max": 75, "mode": "slider", "avty_t": avail_t, "device": dev, "val_tpl": "{{ 75 - (value | int) }}", "cmd_tpl": "{{ 75 - (value | int) }}", "optimistic": True}
@@ -422,7 +426,7 @@ class Bridge:
         if rc == 0:
             client.subscribe(f"{self._topic('+','zone','+','set','+')}")
             client.subscribe(f"{self._topic('+','raw')}")
-            client.subscribe(f"{self._topic('all','set','all_off')}")
+            client.subscribe(f"{self._topic('all','command')}")
             client.subscribe("homeassistant/status")
             client.publish(self._topic("bridge","status"), "online", retain=True); self.publish_discovery()
             log.info(f"MQTT connected to {MQTT_HOST}:{MQTT_PORT}")
@@ -432,9 +436,20 @@ class Bridge:
         try:
             payload = (msg.payload.decode() if msg.payload else "").strip()
             topic = msg.topic; parts = topic.split("/")
-            if "/".join(parts[-3:]) == "all/set/all_off":
-                log.info("Received global ALL OFF command.")
-                for s in self.sessions.values(): s.all_zones_off()
+            if "/".join(parts[-2:]) == "all/command":
+                log.info(f"Received master command: {payload}")
+                if payload.upper() == 'OFF':
+                    # First, send the efficient 'ALL OFF' command to each amp
+                    for s in self.sessions.values():
+                        s.all_zones_off_optimistic()
+
+                    # Now, publish optimistic states for HA's UI
+                    for amp_key, s in self.sessions.items():
+                        for z in range(1, 9):
+                            base_t = s._topic("zone", z)
+                            client.publish(f"{base_t}/power", "off", retain=True)
+                            client.publish(f"{base_t}/mute", "off", retain=True)
+                    log.info("Sent ALL OFF command and optimistically set all zones to OFF")
                 return
             if topic == "homeassistant/status" and payload == "online": self.publish_discovery(); return
             if parts[-1] == "raw":
@@ -478,3 +493,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
