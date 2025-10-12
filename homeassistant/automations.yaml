@@ -1,3 +1,6 @@
+# ==========================
+# RTI Zone → Auto Play Sonos (power on or source→1/2) [FINAL]
+# ==========================
 - alias: RTI Zone → Auto Play Sonos (power on or source→1/2) [FINAL]
   id: rti_zone_autoplay_sonos_power_or_source_final
   mode: parallel
@@ -46,6 +49,7 @@
       to:
         - '1'
         - '2'
+
   variables:
     source_map:
       switch.rti_ad_8x_amp1_kitchen_power: select.rti_ad_8x_amp1_kitchen_source
@@ -68,12 +72,11 @@
       '1': media_player.sonos_1
       '2': media_player.sonos_2
 
-  # --- NEW --- Global cooldown to prevent trigger storms.
   condition:
     - condition: template
       value_template: >
         {{ this.attributes.last_triggered is none or
-              (now() - this.attributes.last_triggered).total_seconds() > 10 }}
+           (now() - this.attributes.last_triggered).total_seconds() > 10 }}
 
   action:
     - choose:
@@ -82,10 +85,23 @@
             - condition: template
               value_template: "{{ 'power' in trigger.entity_id }}"
           sequence:
+            # 1. Wait for a 2-second grace period for the system to settle
+            #    and for any immediate user input (like changing the source).
+            - delay:
+                seconds: 2
+            
+            # 2. After the delay, identify the FINAL source for the zone.
+            - variables:
+                final_source_entity: "{{ source_map.get(trigger.entity_id) }}"
+                
+            # 3. Check if that FINAL source is a Sonos player ('1' or '2').
+            - condition: template
+              value_template: "{{ states(final_source_entity) in ['1', '2'] }}"
+              
+            # 4. If it is, identify the target Sonos and send the play command.
             - variables:
                 target_player: >-
-                  {% set source_entity = source_map.get(trigger.entity_id) %}
-                  {% set source_num = states(source_entity) | string %}
+                  {% set source_num = states(final_source_entity) | string %}
                   {{ sonos_map.get(source_num) }}
             - condition: template
               value_template: "{{ target_player is not none and states(target_player) != 'playing' }}"
@@ -97,9 +113,20 @@
         - conditions:
             - condition: template
               value_template: "{{ 'source' in trigger.entity_id }}"
-            # CRITICAL: Only proceed if the source changed FROM a non-Sonos source.
+            # Only if the previous state was not already 1/2 (prevents loops)
             - condition: template
-              value_template: "{{ trigger.from_state.state not in ['1', '2'] }}"
+              value_template: "{{ trigger.from_state.state not in ['1', '2', 'unavailable', 'unknown'] }}"
+            # And only if that zone's power is currently ON
+            - condition: template
+              value_template: >
+                {% set source_entity = trigger.entity_id %}
+                {% set power_entity = namespace(value=none) %}
+                {% for power_switch, source_select in source_map.items() %}
+                  {% if source_select == source_entity %}
+                    {% set power_entity.value = power_switch %}
+                  {% endif %}
+                {% endfor %}
+                {{ power_entity.value is not none and is_state(power_entity.value, 'on') }}
           sequence:
             - variables:
                 target_player: >-
@@ -110,27 +137,3 @@
             - service: media_player.media_play
               target:
                 entity_id: "{{ target_player }}"
-
-- alias: RTI Amps Network Reset
-  id: rti_amps_network_reset
-  description: Power cycles the network switch when either RTI amp's network freezes.
-  trigger:
-    - platform: mqtt
-      topic: rti/ad8x/network_status/amp1
-      payload: down
-    - platform: mqtt
-      topic: rti/ad8x/network_status/amp2
-      payload: down
-  action:
-    - service: system_log.write
-      data:
-        message: "RTI amp network freeze detected. Initiating power cycle of network switch."
-        level: warning
-    - service: switch.turn_off
-      target:
-        entity_id: switch.rti_amp
-    - delay: 5
-    - service: switch.turn_on
-      target:
-        entity_id: switch.rti_amp
-  mode: single
