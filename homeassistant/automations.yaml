@@ -137,3 +137,45 @@
             - service: media_player.media_play
               target:
                 entity_id: "{{ target_player }}"
+
+# ==========================
+# Sonos 1 – PLAY selected favorite (via pyscript)
+# ==========================
+- id: sonos1_dropdown_to_pyscript_play
+  alias: Sonos 1 – play selected favorite (pyscript)
+  mode: restart
+  trigger:
+    - platform: state
+      entity_id: input_select.sonos_1_favorite
+  condition:
+    # Ignore placeholder options like "(choose favorite)" or no selection
+    - condition: template
+      value_template: "{{ trigger.to_state.state is string and not trigger.to_state.state.startswith('(') }}"
+  action:
+    - service: pyscript.sonos_play_selected_favorite_1
+      data:
+        option: "{{ trigger.to_state.state }}"
+
+# ==========================
+# Sonos 1 – REFRESH favorites (button)
+# ==========================
+- id: sonos1_refresh_favorites_button
+  alias: Sonos 1 – refresh favorites (button)
+  mode: single
+  trigger:
+    - platform: state
+      entity_id: input_button.sonos_favorites_refresh_now
+  action:
+    - service: pyscript.sonos_refresh_favorites_1
+
+# ==========================
+# Sonos 1 – REFRESH favorites at startup
+# ==========================
+- id: sonos1_refresh_favorites_on_start
+  alias: Sonos 1 – refresh favorites at HA start
+  mode: single
+  trigger:
+    - platform: homeassistant
+      event: start
+  action:
+    - service: pyscript.sonos_refresh_favorites_1
