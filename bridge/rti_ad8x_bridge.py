@@ -1,8 +1,12 @@
 #!/usr/bin/env python3
 """
 RTI AD-8x <-> MQTT bridge
-Version 1.5.1 (2025-09-17)
+Version 1.5.2 (2025-09-18)
 
+- CORRECTED: A logic bug that prevented the consecutive failure counter from
+  incrementing correctly has been fixed. The bridge will now reliably publish a
+  "down" message after 3 consecutive poll failures, allowing Home Assistant
+  to trigger the reboot automation.
 - CORRECTED: The "All-Off" command now uses the amplifier's efficient, built-in
   '*ZALLPWR00' command instead of looping through zones individually, while
   still providing instant optimistic UI updates for Home Assistant.
@@ -117,8 +121,16 @@ class AmpSession(threading.Thread):
         self._consecutive_failures = 0
         self._is_down_published = False
 
+    def _cleanup_socket(self):
+        """Closes the socket and clears the buffer without resetting state."""
+        try:
+            if self.sock: self.sock.close()
+        finally:
+            self.sock = None
+            self._rbuf = b""
+
     def _connect(self) -> bool:
-        self._close()
+        self._cleanup_socket()
         try:
             log.info(f"[{self.amp_name}] connecting to {self.addr[0]}:{self.addr[1]}")
             s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -135,22 +147,19 @@ class AmpSession(threading.Thread):
             return True
         except Exception as e:
             log.warning(f"[{self.amp_name}] connect failed: {e}")
-            self._close()
+            self._cleanup_socket()
             return False
 
     def _close(self):
+        """Fully closes the connection and resets all state, including failure counts."""
         was = self.connected
         self.connected = False
         self._consecutive_failures = 0
         self._is_down_published = False
-        try:
-            if self.sock: self.sock.close()
-        finally:
-            self.sock = None
-            self._rbuf = b""
-            if was:
-                self._pub_availability("offline")
-                log.info(f"[{self.amp_name}] closed")
+        self._cleanup_socket()
+        if was:
+            self._pub_availability("offline")
+            log.info(f"[{self.amp_name}] closed")
 
     def _readline(self, timeout_s: float) -> str:
         end = time.time() + timeout_s
@@ -333,19 +342,19 @@ class AmpSession(threading.Thread):
             
             try:
                 for z in range(1, 9):
+                    if self.stop_flag.is_set(): return False
                     self._send_ascii(f"*ZN{zz(z)}STA00"); time.sleep(INTER_CMD_SLEEP)
                     sta_line = self._read_reply(f"#{zz(z)},", PER_CMD_TIMEOUT)
                     self._send_ascii(f"*ZN{zz(z)}SET00"); time.sleep(INTER_CMD_SLEEP)
                     tone_line = self._read_reply(f"${zz(z)},", PER_CMD_TIMEOUT)
                     sta_data, tone_data = parse_sta(sta_line), parse_tone(tone_line)
                     if not (sta_data and tone_data):
-                        log.warning(f"[{self.amp_name}] poll failed for zone {zz(z)}, aborting poll and reconnecting.")
+                        log.warning(f"[{self.amp_name}] poll failed for zone {zz(z)}, aborting poll cycle.")
                         self._handle_poll_failure()
                         return False
                     self._pub_zone_full(z, sta_data, tone_data)
                 
                 self._handle_poll_success()
-                self._pub_availability("online")
                 return True
             except Exception as e:
                 log.warning(f"[{self.amp_name}] poll error: {e}")
@@ -354,15 +363,18 @@ class AmpSession(threading.Thread):
 
     def _handle_poll_success(self):
         """Resets failure counter on a successful poll."""
+        if self._consecutive_failures > 0:
+             log.info(f"[{self.amp_name}] Amp communication restored.")
         self._consecutive_failures = 0
         if self._is_down_published:
-            log.info(f"[{self.amp_name}] Amp is back online. Resetting 'down' flag.")
             self._is_down_published = False
 
     def _handle_poll_failure(self):
         """Increments failure counter and publishes 'down' message if threshold is met."""
         self._consecutive_failures += 1
         log.warning(f"[{self.amp_name}] Poll failed. Consecutive failures: {self._consecutive_failures}")
+        self.connected = False # Mark as disconnected to force a reconnect attempt
+        
         if self._consecutive_failures >= 3 and not self._is_down_published:
             log.error(f"[{self.amp_name}] Exceeded poll failure threshold. Publishing 'down' message.")
             down_topic = f"{MQTT_BASE}/network_status/{self.amp_name}"
@@ -376,8 +388,8 @@ class AmpSession(threading.Thread):
                 backoff = 1.0
                 time.sleep(POLL_INTERVAL_SEC)
             else:
-                self._close()
                 time.sleep(backoff); backoff = min(30.0, backoff * 2)
+
     def stop(self): self.stop_flag.set(); self._close()
 
 class Bridge:
@@ -479,7 +491,7 @@ class Bridge:
             elif cmd == "bass_down": ok = sess.bass_down(zone)
             elif cmd == "treble_up": ok = sess.treble_up(zone)
             elif cmd == "treble_down": ok = sess.treble_down(zone)
-            client.publish(self._topic(amp, "zone", zone, "ack", cmd), "ok" if ok else "err", retain=False)
+            client.publish(self._topic(amp, "zone", "ack", cmd), "ok" if ok else "err", retain=False)
         except Exception: traceback.print_exc()
 
 def main():
@@ -493,4 +505,4 @@ def main():
 
 if __name__ == "__main__":
     main()
-
+  
