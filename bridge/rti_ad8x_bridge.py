@@ -1,13 +1,22 @@
 #!/usr/bin/env python3
 """
 RTI AD-8x <-> MQTT bridge
-Version 1.6.0 (2025-11-15)
+Version 1.8.0 (2025-11-15)
 
 - NEW: Added instrumentation and diagnostics, mirroring the vantage-bridge.
   The bridge now publishes CPU, memory, uptime, and connection status
   to 'rti/ad8x/diagnostics/...' for monitoring in Home Assistant.
 - REFINED: The main thread now serves as the diagnostics publisher,
   running every HEALTH_CHECK_INTERVAL.
+- FIX (v1.7.0): Intercept 'power on' command to call 'set_volume'
+  with the last known volume. This avoids the amp's default
+  power-on volume (45) after a reboot, per the AD-8x spec.
+- FIX (v1.8.0): Added command coalescing (batching) to set_bass
+  and set_treble to prevent flooding the amp with commands.
+- FIX (v1.8.0): Re-added power-on guards to set_bass/set_treble,
+  as hardware ignores these commands when the zone is off.
+- REFINED (v1.8.0): Increased default VOL_COALESCE_SEC to 1.2s
+  to better handle rapid button taps.
 """
 
 import os, sys, time, json, random, signal, socket, logging, traceback, threading
@@ -58,7 +67,7 @@ SET_RETRIES       = int(os.getenv("SET_RETRIES", "2"))
 RETRY_SLEEP       = float(os.getenv("RETRY_SLEEP", "0.2"))
 DUMP_RAW_CHUNKS   = os.getenv("DUMP_RAW_CHUNKS", "1") not in ("0", "false", "False")
 
-VOL_COALESCE_SEC        = float(os.getenv("VOL_COALESCE_SEC", "0.15"))
+VOL_COALESCE_SEC        = float(os.getenv("VOL_COALESCE_SEC", "1.2"))
 VOL_ECHO_SUPPRESS_SEC   = float(os.getenv("VOL_ECHO_SUPPRESS_SEC", "1.00"))
 
 # --- INSTRUMENTATION ---
@@ -249,15 +258,11 @@ class AmpSession(threading.Thread):
     def set_source(self, zone: int, source: int) -> bool:
         if not self._is_zone_on(zone): log.warning(f"[{self.amp_name}] Ignoring source change for zone {zone}; power is off."); return False
         return self._send_and_confirm(zone, f"*ZN{zz(zone)}SRC{zz(source)}")
-    def set_bass(self, zone: int, level: int) -> bool:
-        if not self._is_zone_on(zone): log.warning(f"[{self.amp_name}] Ignoring bass change for zone {zone}; power is off."); return False
-        return self._send_and_confirm(zone, f"*ZN{zz(zone)}BAS{_encode_tone(level)}")
-    def set_treble(self, zone: int, level: int) -> bool:
-        if not self._is_zone_on(zone): log.warning(f"[{self.amp_name}] Ignoring treble change for zone {zone}; power is off."); return False
-        return self._send_and_confirm(zone, f"*ZN{zz(zone)}TRB{_encode_tone(level)}")
+    
     def volume_up(self, zone: int) -> bool:
         if not self._is_zone_on(zone): log.warning(f"[{self.amp_name}] Ignoring volume up for zone {zone}; power is off."); return False
         return self._send_and_confirm(zone, f"*ZN{zz(zone)}VOLUP")
+    
     def volume_down(self, zone: int) -> bool:
         if not self._is_zone_on(zone): log.warning(f"[{self.amp_name}] Ignoring volume down for zone {zone}; power is off."); return False
         return self._send_and_confirm(zone, f"*ZN{zz(zone)}VOLDN")
@@ -282,18 +287,20 @@ class AmpSession(threading.Thread):
         cur = self._zone_states.get(zone, {}).get("treble", 0)
         return self.set_treble(zone, max(-12, cur - 2))
 
+    # --- BATCHING / COALESCING FUNCTIONS ---
+
     def set_volume(self, zone: int, v: int) -> bool:
-        if not self._is_zone_on(zone): log.warning(f"[{self.amp_name}] Ignoring volume set for zone {zone}; power is off."); return False
+        # NOTE: This is our "power on" command, so it does NOT have a power check.
         v_clamped = max(0, min(75, int(v)))
         buf = self._zone_states.setdefault(zone, {}); buf["target_vol"] = v_clamped
-        t = buf.get("timer")
+        t = buf.get("vol_timer")
         if t and t.is_alive(): t.cancel()
         t = threading.Timer(VOL_COALESCE_SEC, self._flush_volume, args=(zone,))
-        buf["timer"] = t; t.start()
+        buf["vol_timer"] = t; t.start()
         return True
 
     def _flush_volume(self, zone: int):
-        if not self._is_zone_on(zone): return
+        # NOTE: This is our "power on" command, so it does NOT have a power check.
         buf = self._zone_states.get(zone, {}); target = buf.get("target_vol")
         if target is None: return
         cmd = f"*ZN{zz(zone)}VOL{zz(target)}"
@@ -304,6 +311,56 @@ class AmpSession(threading.Thread):
         if not ok:
             log.warning(f"[{self.amp_name}] Coalesced volume SET failed. Re-querying.")
             self._send_and_confirm(zone, f"*ZN{zz(zone)}STA00")
+
+    def set_bass(self, zone: int, level: int) -> bool:
+        if not self._is_zone_on(zone): log.warning(f"[{self.amp_name}] Ignoring bass change for zone {zone}; power is off."); return False
+        
+        level_clamped = max(-12, min(12, int(level)))
+        buf = self._zone_states.setdefault(zone, {}); buf["target_bass"] = level_clamped
+        t = buf.get("bass_timer") 
+        if t and t.is_alive(): t.cancel()
+        t = threading.Timer(VOL_COALESCE_SEC, self._flush_bass, args=(zone,))
+        buf["bass_timer"] = t; t.start()
+        return True
+
+    def _flush_bass(self, zone: int):
+        if not self._is_zone_on(zone): return # Check again in case zone was turned off
+        buf = self._zone_states.get(zone, {}); target = buf.get("target_bass")
+        if target is None: return
+        
+        cmd = f"*ZN{zz(zone)}BAS{_encode_tone(target)}"
+        log.info(f"[{self.amp_name}] Coalesced BASS zone {zz(zone)} -> {target}")
+        
+        ok = self._send_and_confirm(zone, cmd)
+        if not ok:
+            log.warning(f"[{self.amp_name}] Coalesced bass SET failed. Re-querying.")
+            self._send_and_confirm(zone, f"*ZN{zz(zone)}STA00")
+
+    def set_treble(self, zone: int, level: int) -> bool:
+        if not self._is_zone_on(zone): log.warning(f"[{self.amp_name}] Ignoring treble change for zone {zone}; power is off."); return False
+        
+        level_clamped = max(-12, min(12, int(level)))
+        buf = self._zone_states.setdefault(zone, {}); buf["target_treble"] = level_clamped
+        t = buf.get("treble_timer") 
+        if t and t.is_alive(): t.cancel()
+        t = threading.Timer(VOL_COALESCE_SEC, self._flush_treble, args=(zone,))
+        buf["treble_timer"] = t; t.start()
+        return True
+
+    def _flush_treble(self, zone: int):
+        if not self._is_zone_on(zone): return # Check again in case zone was turned off
+        buf = self._zone_states.get(zone, {}); target = buf.get("target_treble")
+        if target is None: return
+        
+        cmd = f"*ZN{zz(zone)}TRB{_encode_tone(target)}"
+        log.info(f"[{self.amp_name}] Coalesced TREBLE zone {zz(zone)} -> {target}")
+        
+        ok = self._send_and_confirm(zone, cmd)
+        if not ok:
+            log.warning(f"[{self.amp_name}] Coalesced treble SET failed. Re-querying.")
+            self._send_and_confirm(zone, f"*ZN{zz(zone)}STA00")
+
+    # --- END BATCHING ---
 
     def _send_and_confirm(self, zone: int, cmd_ascii: str) -> bool:
         with self.lock:
@@ -536,7 +593,25 @@ class Bridge:
             sess = self.sessions.get(amp)
             if not sess: return
             ok = False
-            if cmd == "power": ok = sess.set_power(zone, payload.lower() in ("1", "on", "true"))
+
+            # --- SPEC-SAFE POWER-ON FIX ---
+            if cmd == "power":
+                is_on = payload.lower() in ("1", "on", "true")
+                if is_on:
+                    # 'power on' command received
+                    # Per the spec, *ZNzzVOLvv* also turns the zone on.
+                    # We use this to power on AT the last known volume,
+                    # bypassing the amp's "default 45" behavior.
+                    
+                    # Get last volume from cache, default to a 'safe' 65
+                    last_vol = sess._zone_states.get(zone, {}).get("vol_0_75", 65)
+                    log.info(f"[{amp}] Power ON for zone {zone} received. Setting volume to {last_vol} to power on.")
+                    ok = sess.set_volume(zone, last_vol)
+                else:
+                    # 'power off' command is normal
+                    ok = sess.set_power(zone, False)
+            # --- END OF FIX ---
+            
             elif cmd == "mute": ok = sess.set_mute(zone, payload.lower() in ("1", "on", "true"))
             elif cmd == "toggle_mute": ok = sess.toggle_mute(zone)
             elif cmd == "source": ok = sess.set_source(zone, int(payload))
