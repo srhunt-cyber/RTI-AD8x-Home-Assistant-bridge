@@ -1,30 +1,21 @@
 #!/usr/bin/env python3
 """
 RTI AD-8x <-> MQTT bridge
-Version 1.5.2 (2025-09-18)
+Version 1.6.0 (2025-11-15)
 
-- CORRECTED: A logic bug that prevented the consecutive failure counter from
-  incrementing correctly has been fixed. The bridge will now reliably publish a
-  "down" message after 3 consecutive poll failures, allowing Home Assistant
-  to trigger the reboot automation.
-- CORRECTED: The "All-Off" command now uses the amplifier's efficient, built-in
-  '*ZALLPWR00' command instead of looping through zones individually, while
-  still providing instant optimistic UI updates for Home Assistant.
-- NEW: Optimistic All-Off command for instant UI updates in Home Assistant.
-  The bridge listens on 'rti/ad8x/all/command' for an 'OFF' payload.
-- NEW: Added 'optimistic: true' to power and mute switches for a more
-  responsive feel when toggling individual zones from the dashboard.
-- REFINED: The master command topic is now cleaner and more consistent.
-
-Install notes:
-  sudo systemctl daemon-reload
-  sudo systemctl restart rti-ad8x-mqtt-bridge.service
-  systemctl status rti-ad8x-mqtt-bridge.service --no-pager
+- NEW: Added instrumentation and diagnostics, mirroring the vantage-bridge.
+  The bridge now publishes CPU, memory, uptime, and connection status
+  to 'rti/ad8x/diagnostics/...' for monitoring in Home Assistant.
+- REFINED: The main thread now serves as the diagnostics publisher,
+  running every HEALTH_CHECK_INTERVAL.
 """
 
 import os, sys, time, json, random, signal, socket, logging, traceback, threading
 from typing import Optional, Tuple
 import paho.mqtt.client as mqtt
+# --- INSTRUMENTATION ---
+import psutil # REQUIRED FOR METRICS
+# --- INSTRUMENTATION ---
 
 # ─────────────────────────────────────────────────────────────────────────────
 # LOGGING
@@ -69,6 +60,10 @@ DUMP_RAW_CHUNKS   = os.getenv("DUMP_RAW_CHUNKS", "1") not in ("0", "false", "Fal
 
 VOL_COALESCE_SEC        = float(os.getenv("VOL_COALESCE_SEC", "0.15"))
 VOL_ECHO_SUPPRESS_SEC   = float(os.getenv("VOL_ECHO_SUPPRESS_SEC", "1.00"))
+
+# --- INSTRUMENTATION ---
+HEALTH_CHECK_INTERVAL = 30.0 # Interval for sending metrics and heartbeat
+# --- INSTRUMENTATION ---
 
 EOL, ESC2 = b"\r", b"\x1b" + b"2"
 
@@ -148,6 +143,7 @@ class AmpSession(threading.Thread):
         except Exception as e:
             log.warning(f"[{self.amp_name}] connect failed: {e}")
             self._cleanup_socket()
+            self.connected = False # Explicitly set
             return False
 
     def _close(self):
@@ -398,6 +394,12 @@ class Bridge:
         if MQTT_USER: self.client.username_pw_set(MQTT_USER, MQTT_PASS)
         self.client.will_set(f"{MQTT_BASE}/bridge/status", "offline", retain=True)
         self.sessions = {}
+        # --- INSTRUMENTATION ---
+        self._start_time = time.monotonic()
+        self._pid = os.getpid()
+        self._process = psutil.Process(self._pid)
+        self._last_diag_pub_time = time.monotonic() # Set to start time
+        # --- INSTRUMENTATION ---
 
     def publish_discovery(self):
         for amp_key in AMPS.keys():
@@ -424,10 +426,66 @@ class Bridge:
                 treble_cfg = {"name": f"{zname} Treble", "uniq_id": zone_object_id(amp_key, z, "treble"), "stat_t": f"{base}/treble", "cmd_t": f"{cmd_base}/treble", "min": -12, "max": 12, "step": 2, "mode": "slider", "avty_t": avail_t, "device": dev, "icon": "mdi:surround-sound", "optimistic": True}
                 self.client.publish(discovery_topic("number", zone_object_id(amp_key, z, "treble")), json.dumps(treble_cfg), retain=True)
 
+    # --- INSTRUMENTATION ---
+    def publish_diagnostics(self):
+        """Gather and publish system and connection diagnostics metrics."""
+        if not self.client.is_connected():
+            return
+
+        # 1. System Process Metrics (using psutil)
+        try:
+            # Get instantaneous CPU% (first call returns 0.0,
+            # so call with interval=None after the first time)
+            cpu_pct = self._process.cpu_percent(interval=None)
+            mem_info = self._process.memory_info()
+            mem_mb = round(mem_info.rss / (1024 * 1024), 2)
+            
+            self.client.publish(self._topic("diagnostics", "cpu_usage_pct"), str(cpu_pct), retain=False)
+            self.client.publish(self._topic("diagnostics", "memory_usage_mb"), str(mem_mb), retain=False)
+        except Exception as e:
+            log.warning(f"[Bridge] Failed to gather process metrics: {e}")
+
+        # 2. Bridge Uptime
+        uptime_s = int(time.monotonic() - self._start_time)
+        self.client.publish(self._topic("diagnostics", "uptime_s"), str(uptime_s), retain=True)
+
+        # 3. Individual Amp Connection Status
+        amp_statuses = {}
+        for name, session in self.sessions.items():
+            amp_statuses[name] = "online" if session.connected else "offline"
+        
+        self.client.publish(
+            self._topic("diagnostics", "amp_connection_status"),
+            json.dumps(amp_statuses),
+            retain=True
+        )
+        
+        # 4. Entity Count (using Zones)
+        entity_count = len(self.sessions) * 8 # 8 zones per amp
+        self.client.publish(
+            self._topic("diagnostics", "entity_count"),
+            str(entity_count),
+            retain=True
+        )
+        
+        # 5. Heartbeat (re-publish bridge status)
+        self.client.publish(self._topic("bridge","status"), "online", retain=True)
+    # --- INSTRUMENTATION ---
+
     def _topic(self, *parts) -> str: return "/".join([MQTT_BASE, *[str(p) for p in parts]])
     def start(self):
         self.client.on_connect = self.on_connect; self.client.on_message = self.on_message
         self.client.connect_async(MQTT_HOST, MQTT_PORT, keepalive=30); self.client.loop_start()
+        
+        # --- INSTRUMENTATION ---
+        # Call cpu_percent once with interval to establish a baseline
+        # This prevents the first 'None' interval call from returning 0.0
+        try:
+            self._process.cpu_percent(interval=0.1) 
+        except Exception as e:
+            log.warning(f"[Bridge] Initial psutil call failed: {e}")
+        # --- INSTRUMENTATION ---
+
         for name, addr in AMPS.items():
             s = AmpSession(name, addr, self.client); self.sessions[name] = s; s.start()
             log.info(f"Started AmpSession {name} -> {addr[0]}:{addr[1]}")
@@ -500,9 +558,17 @@ def main():
     signal.signal(signal.SIGINT, _graceful); signal.signal(signal.SIGTERM, _graceful)
     try:
         bridge.start();
-        while True: time.sleep(1)
+        # --- INSTRUMENTATION ---
+        # The main thread is now the diagnostics publisher
+        while True: 
+            now = time.monotonic()
+            if (now - bridge._last_diag_pub_time) > HEALTH_CHECK_INTERVAL:
+                bridge.publish_diagnostics()
+                bridge._last_diag_pub_time = now
+            time.sleep(1.0) # Check every second
+        # --- INSTRUMENTATION ---
     finally: bridge.stop()
 
 if __name__ == "__main__":
     main()
-  
+    
