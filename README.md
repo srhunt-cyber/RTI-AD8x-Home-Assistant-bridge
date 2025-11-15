@@ -1,263 +1,299 @@
-RTI AD-8x MQTT Bridge & Sonos Integration for Home Assistant
+# RTI AD-8x MQTT Bridge & Home Assistant Integration
 
-✅ Project Overview
-This project replaces legacy control apps with a modern, unified Home Assistant (HA) interface. It integrates two RTI AD-8x amplifiers (16 zones), multiple Sonos players (including two Sonos Ports as inputs), and Amazon Alexa into a single, seamless multi-room music control system. The result is a fast, intuitive, source-first system that lets you start music quickly, distribute it to any combination of RTI zones, and control everything by phone or voice.
+## ✅ Project Overview
 
-✨ Key Features
+This project replaces legacy control apps with a modern, unified Home Assistant (HA) interface. It integrates two RTI AD-8x amplifiers (16 zones) and multiple Sonos players into a single, seamless multi-room music control system.
 
-Full RTI Zone Control — Power, Mute, Source, Volume, Bass, Treble for all 16 zones.
+The core of the project is a Python-based service that provides a two-way bridge between the RTI amplifiers and an MQTT broker, enabling full integration with Home Assistant via MQTT Discovery.
 
-Dynamic Sonos Favorites — Script auto-scans all Sonos favorites (stations/playlists) and populates a touch-friendly dropdown in HA.
+This repository contains the Python bridge script. The documentation below explains how to set it up and how to integrate it with other Home Assistant components like Sonos and Alexa for a complete solution.
 
-Complete Alexa Voice Control — On/off and safe, clamped volume via virtual template lights (e.g., “Alexa, set Kitchen Speakers to 50 percent”).
+## ✨ Key Features
 
-MQTT Auto-Discovery — Bridge publishes RTI entities so HA picks them up automatically.
+* **Full RTI Zone Control:** Power, Mute, Source, Volume, Bass, & Treble for all 16 zones.
+* **Home Assistant Auto-Discovery:** Bridge publishes RTI entities so HA picks them up automatically.
+* **Service Health Monitoring:** Publishes bridge health stats (CPU, memory, uptime, amp connection status) to MQTT for monitoring.
+* **Dynamic Sonos Favorites:** (Requires Pyscript) Auto-scans Sonos favorites and populates a dropdown in HA.
+* **Complete Alexa Voice Control:** (Requires Nabu Casa) On/off and safe, clamped volume via virtual template lights.
+* **Optimistic UI:** Dashboards update instantly; commands don't wait for amp confirmation.
+* **Global "All Off" Command:** Listens on `rti/ad8x/all/command` for an `OFF` payload to turn all 16 zones off.
+* **Robust Connection:** Detects amp network failures after 3 missed polls and publishes a "down" message for external automations.
 
-Responsive, Optimistic UI — Dashboards update instantly; commands don’t wait for amp confirmation to render.
+---
 
-Discrete Commands — volume_up/down, bass_up/down, treble_up/down for snappy button behavior.
+## 🚀 Part 1: Bridge Installation & Setup
 
-Global “All Off” — One command powers down all 16 zones.
+This section covers installing the Python bridge script on its Linux host (e.g., `rtipoll.local`).
 
-Robust Connection — “Fail-fast” behavior with automatic reconnects and retries.
+### 1. Clone the Repository
 
-Network Failover — The bridge now detects amp network failures after 3 consecutive missed polls and publishes a "down" message, enabling external automations to power cycle the network switch.
+```bash
+git clone [https://github.com/srhunt-cyber/RTI-AD8x-Home-Assistant-bridge.git](https://github.com/srhunt-cyber/RTI-AD8x-Home-Assistant-bridge.git)
+cd RTI-AD8x-Home-Assistant-bridge
+```
 
-Tone Controls & Latency
-On the AD-8x, Bass/Treble apply more slowly than Volume. They’re ideal for occasional tuning, not constant adjustment. Rapid taps can queue; prefer small, deliberate changes. (Optional bridge tweak: rate-limit/coalesce tone commands to keep things snappy.)
+### 2. Create a Virtual Environment
 
-🧱 System Requirements
-Hardware
+It is highly recommended to use a Python virtual environment.
 
-2 × RTI AD-8x amplifiers (Ethernet)
+```bash
+# Create the virtual environment
+python3 -m venv .venv
 
-2 × Sonos Port → Amp1 Inputs 1 & 2
+# Activate it
+source .venv/bin/activate
+```
 
-Additional Sonos speakers (for grouping)
+### 3. Install Dependencies
 
-Amazon Echo devices
+This script requires Python packages. The `requirements.txt` file lists all dependencies.
 
-Software
+```bash
+# Install all required packages
+pip install -r requirements.txt
+```
 
-Host VM (Ubuntu 24.04, rtipoll.local) — Mosquitto MQTT + Python bridge (systemd service)
+Your `requirements.txt` file should contain:
+```
+paho-mqtt
+psutil
+```
 
-Home Assistant (HAOS on separate VM, homeassistant.local)
+### 4. Configure the Bridge
 
-MQTT Integration
+First, copy the example environment file:
 
-Pyscript Integration (via HACS)
+```bash
+cp .env.example .env
+```
 
-Home Assistant Cloud (Nabu Casa) for Alexa
+Now, edit the `.env` file to add your MQTT broker details:
+```bash
+nano .env
+```
+```ini
+# .env
+MQTT_HOST=your-broker-ip
+MQTT_USER=your-mqtt-user
+MQTT_PASS=your-mqtt-password
+```
 
-🚀 Quick Start
-1) Ubuntu Host — Mosquitto
+You must also **edit the `rti_ad8x_mqtt_bridge.py` script** to set the static IP addresses for your amplifiers in the `AMPS` dictionary at the top of the file.
 
-Bash
-sudo apt update && sudo apt install -y mosquitto mosquitto-clients
-sudo systemctl enable --now mosquitto
-(Recommended hardening)
-/etc/mosquitto/conf.d/local.conf
+### 5. Set Up the `systemd` Service
 
-allow_anonymous false
-password_file /etc/mosquitto/passwd
-listener 1883 0.0.0.0
-persistence true
-persistence_location /var/lib/mosquitto/
-Bash
-sudo mosquitto_passwd -c /etc/mosquitto/passwd homeassistant
-sudo systemctl restart mosquitto
-2) Ubuntu Host — Bridge (systemd)
-/etc/systemd/system/rti-ad8x-bridge.service
+Create a `systemd` service file to keep the bridge running in the background.
 
+```bash
+sudo nano /etc/systemd/system/rti-ad8x-mqtt-bridge.service
+```
+
+Paste the following configuration. **Remember to change `YOUR_USER`** and the `WorkingDirectory`/`ExecStart` paths if you cloned the repo to a different location.
+
+```ini
 [Unit]
-Description=RTI AD-8x MQTT Bridge
-After=network-online.target mosquitto.service
-Wants=network-online.target
+Description=RTI AD-8x MQTT Bridge Service
+After=network-online.target
 
 [Service]
-Type=simple
-User=ubuntu
-WorkingDirectory=/opt/rti-ad8x-bridge
-Environment="MQTT_HOST=127.0.0.1" "MQTT_PORT=1883" "MQTT_USER=homeassistant" "MQTT_PASS=REDACTED"
-ExecStart=/usr/bin/python3 /opt/rti-ad8x-bridge/rti_ad8x_bridge.py
-Restart=on-failure
-RestartSec=3
+User=YOUR_USER
+WorkingDirectory=/home/YOUR_USER/RTI-AD8x-Home-Assistant-bridge
+ExecStart=/home/YOUR_USER/RTI-AD8x-Home-Assistant-bridge/.venv/bin/python rti_ad8x_mqtt_bridge.py
+Restart=always
+RestartSec=10
 
 [Install]
 WantedBy=multi-user.target
-Bash
+```
+
+Finally, enable and start the new service:
+
+```bash
+# Reload systemd to find the new service
 sudo systemctl daemon-reload
-sudo systemctl enable --now rti-ad8x-bridge
-3) Home Assistant — Integrations & UI
-Install HACS, then install Pyscript. Add MQTT integration and point it to the Ubuntu host. RTI entities will appear automatically.
-UI prerequisite: install custom:button-card (via HACS) and add the resource: Settings → Dashboards → Resources → Add Resource
 
-URL: /hacsfiles/button-card/button-card.js
+# Enable the service to start on boot
+sudo systemctl enable rti-ad8x-mqtt-bridge.service
 
-Type: Module
-4) Sonos Favorites — Helper & Automations
-Add a helper:
-configuration.yaml (or via UI → Helpers)
+# Start the service now
+sudo systemctl start rti-ad8x-mqtt-bridge.service
+```
 
-input_select:
-  sonos_favorites:
-    name: Sonos Favorites
-    options: []
-Automations (two common patterns):
+You can check the logs at any time with:
+`journalctl -u rti-ad8x-mqtt-bridge.service -f`
 
-Sync favorites → keeps input_select.sonos_favorites up-to-date
+---
 
-Play selected favorite → calls media_player.select_source on the target Sonos
-(Names you can search in HA: sonos_favorites_sync and sonos_play_selected_favorite.)
-5) Alexa (Nabu Casa)
-Create template lights (below) for each RTI zone you want voice-controlled. In Nabu Casa → Alexa, expose those lights and Run Discovery.
-Voice example: “Alexa, set Kitchen Speakers to 40 percent.”
+## 📺 Part 2: Home Assistant Integration
 
-💡 Template Lights (Safe-Clamped Volume for Alexa & iPhone)
-Goal: Map HA brightness 1–254 → amp volume 5–40 (on the AD-8x scale 0–75). This keeps voice control safe and predictable. AD-8x volume range: 0–75 (not 0–79). Default clamp in examples below: 5–40. Adjust to taste per room.
-configuration.yaml (excerpt)
+Once the bridge is running, all your RTI amplifier zones will be auto-discovered in Home Assistant. These next steps integrate them with the rest of your smart home.
 
+### 1. Bridge Health Monitoring (Sensors)
+
+To monitor the bridge's health, add the following sensors to your Home Assistant configuration.
+
+Add this block to your `configuration.yaml` (or a dedicated `mqtt_sensors.yaml` file):
+
+```yaml
+mqtt:
+  sensor:
+    # Uptime Sensor
+    - unique_id: rtipoll_bridge_uptime
+      name: "RTI Bridge Uptime"
+      state_topic: "rti/ad8x/diagnostics/uptime_s"
+      device_class: duration
+      unit_of_measurement: "s"
+      icon: mdi:clock-start
+      value_template: "{{ value | int }}"
+      
+    # CPU Usage Sensor
+    - unique_id: rtipoll_bridge_cpu
+      name: "RTI Bridge CPU"
+      state_topic: "rti/ad8x/diagnostics/cpu_usage_pct"
+      unit_of_measurement: "%"
+      value_template: "{{ value | float }}"
+      icon: mdi:cpu-64-bit
+      
+    # Memory Usage Sensor
+    - unique_id: rtipoll_bridge_memory
+      name: "RTI Bridge Memory"
+      state_topic: "rti/ad8x/diagnostics/memory_usage_mb"
+      unit_of_measurement: "MB"
+      value_template: "{{ value | float }}"
+      icon: mdi:memory
+
+    # Discovered Zones Count
+    - unique_id: rtipoll_entity_count
+      state_topic: "rti/ad8x/diagnostics/entity_count"
+      unit_of_measurement: "zones"
+      value_template: "{{ value | int }}"
+      icon: mdi:speaker-multiple
+      
+    # Amp Connection Status
+    - unique_id: rtipoll_controller_link
+      name: "RTI Amp Connections"
+      state_topic: "rti/ad8x/diagnostics/amp_connection_status"
+      icon: mdi:lan
+      value_template: >
+        {% set amps = value_json | default({}) %}
+        {% set online_count = (amps.values() | select('eq', 'online') | list | count) %}
+        {{ online_count }}/{{ amps | length }} online
+
+  binary_sensor:
+    # LWT Service Status
+    - unique_id: rtipoll_bridge_service_status
+      name: "RTI Bridge Service Status"
+      state_topic: "rti/ad8x/bridge/status"
+      payload_on: "online"
+      payload_off: "offline"
+      device_class: connectivity
+      icon: mdi:check-circle-outline
+```
+
+After adding the YAML, restart Home Assistant or **Reload the MQTT Integration** from the "Devices & Services" page.
+
+### 2. Sonos Favorites Integration (Pyscript)
+
+This allows you to select a Sonos favorite from a dropdown and have it play on a Sonos Port (which is connected as an input to your RTI amp).
+
+1.  **Install Pyscript:** Go to HACS -> Integrations -> and install "Pyscript".
+2.  **Create a Helper:** Create an `input_select` helper (via UI or YAML) to hold the favorites list.
+    ```yaml
+    input_select:
+      sonos_favorites:
+        name: Sonos Favorites
+        options:
+          - "Select a Favorite"
+    ```
+3.  **Create Automations:**
+    * **Automation 1 (Sync Favorites):** An automation that runs `pyscript.sonos_favorites_sync` to keep the `input_select` updated.
+    * **Automation 2 (Play Favorite):** An automation triggered by the `input_select` changing, which calls `media_player.select_source` on the target Sonos Port.
+
+### 3. Alexa Voice Control (via Nabu Casa)
+
+This creates virtual "light" entities for Alexa. It allows you to say, "Alexa, set Kitchen Speakers to 50 percent," and have it safely map that to a pre-defined volume range on the amp.
+
+1.  **Expose Entities:** Ensure you have Home Assistant Cloud (Nabu Casa) set up.
+2.  **Add Template Lights:** Add the following to your `configuration.yaml` (or a `templates.yaml` file).
+
+```yaml
 template:
   light:
     - name: "Kitchen Speakers"
       unique_id: ad8x_amp1_kitchen_music_light
-      state: "{{ is_state('switch.rti_ad_8x_amp1_kitchen_power', 'on') }}"
-      # Map amp 5..40 -> HA 1..254
+      # Light is "on" if the amp zone is on
+      state: "{{ is_state('switch.kitchen_power', 'on') }}"
+      
+      # Map amp volume 5..40 -> HA brightness 1..254
       level: >
-        {% set v = states('number.rti_ad_8x_amp1_kitchen_volume') | float(15) %}
+        {% set v = states('number.kitchen_volume') | float(15) %}
         {% set v = [40, [v, 5]|max]|min %}
         {{ (((v - 5) / 35) * 253 + 1) | round(0) }}
+        
+      # Map HA brightness 1..254 -> amp volume 5..40
       set_level:
-        # Map HA 1..254 -> amp 5..40, clamp, round
         variables:
           b: "{{ [[brightness | int, 1] | max, 254] | min }}"
           v: "{{ ((b - 1) / 253.0) * 35 + 5 }}"
         service: number.set_value
-        target: { entity_id: number.rti_ad_8x_amp1_kitchen_volume }
+        target: { entity_id: number.kitchen_volume }
         data: { value: "{{ [40, [v, 5]|max]|min | round(0) }}" }
+        
+      # What to do on "Alexa, turn on Kitchen Speakers"
       turn_on:
         - service: switch.turn_on
-          target: { entity_id: switch.rti_ad_8x_amp1_kitchen_power }
+          target: { entity_id: switch.kitchen_power }
+        # Set a default volume when turning on
         - service: number.set_value
-          target: { entity_id: number.rti_ad_8x_amp1_kitchen_volume }
+          target: { entity_id: number.kitchen_volume }
           data: { value: 15 }
+          
+      # What to do on "Alexa, turn off Kitchen Speakers"
       turn_off:
         service: switch.turn_off
-        target: { entity_id: switch.rti_ad_8x_amp1_kitchen_power }
-🛠️ Replicate per zone by changing the switch._power and number.volume entity IDs.
+        target: { entity_id: switch.kitchen_power }
 
-📱 Dashboards (iPhone-Optimized)
+    # --- REPEAT FOR OTHER ZONES ---
+    # - name: "Great Room Speakers"
+    #   unique_id: ad8x_amp1_great_room_music_light
+    #   state: "{{ is_state('switch.great_room_power', 'on') }}"
+    #   ...
+```
+*Note: You must replace `switch.kitchen_power` and `number.kitchen_volume` with the actual entity IDs created by the bridge.*
 
-Expanded “Phone” Dashboard — Per-zone controls (Power, Source, Volume, Bass, Treble) with responsive sliders and optimistic ± buttons.
+3.  **Expose & Discover:** In Nabu Casa settings, expose these new `light.kitchen_speakers` entities to Alexa. Ask Alexa to "Discover devices."
 
-Compact “At-a-Glance” Dashboard — Single-line status for all 16 zones + Sonos favorites dropdown for fast starts.
-UI prerequisites: HACS + custom:button-card (resource added as Module).
+### 4. Dashboard UI Dependencies
 
-📡 MQTT API
-State Topics (Bridge → MQTT)
+The dashboards shown in this project's screenshots rely on the `custom:button-card` plugin.
 
-rti/ad8x/<amp>/zone/<zone>/power → on / off
+* **Install:** Go to HACS -> Frontend -> and install "Button Card".
+* **Add Resource:** Go to Settings → Dashboards → More Options (⋮) → Resources → Add Resource.
+    * URL: `/hacsfiles/button-card/button-card.js`
+    * Type: `JavaScript Module`
 
-rti/ad8x/<amp>/zone/<zone>/mute → on / off
+---
 
-rti/ad8x/<amp>/zone/<zone>/source → 1..8
+## 🧪 Troubleshooting
 
-rti/ad8x/<amp>/zone/<zone>/volume → 0..75
+**Symptom:** The service fails to start, and `journalctl -u rti-ad8x-mqtt-bridge.service` shows `-- No entries --`.
 
-rti/ad8x/<amp>/zone/<zone>/bass → -12..12
+**Cause:** This almost always means a Python error is happening on import, before logging is set up. The most common cause is a missing dependency (like `psutil`).
 
-rti/ad8x/<amp>/zone/<zone>/treble → -12..12
+**Fix:**
+1.  Stop the service: `sudo systemctl stop rti-ad8x-mqtt-bridge.service`
+2.  Go to the script directory: `cd /home/YOUR_USER/RTI-AD8x-Home-Assistant-bridge`
+3.  Activate the virtual environment: `source .venv/bin/activate`
+4.  Install dependencies: `pip install -r requirements.txt`
+5.  Test run it manually: `python rti_ad8x_mqtt_bridge.py`
+6.  If it runs, `CTRL+C` and restart the service: `sudo systemctl start rti-ad8x-mqtt-bridge.service`
 
-rti/ad8x/<amp>/status → online / offline
+**Symptom:** Nothing responds in Home Assistant.
 
-rti/ad8x/bridge/status → online / offline
+**Fix:**
+1.  Watch MQTT traffic on your broker host: `mosquitto_sub -v -t 'rti/ad8x/#'`
+2.  Check the service log: `journalctl -u rti-ad8x-mqtt-bridge.service -f`
 
-(NEW) rti/ad8x/network_status/<amp> → down
+**Symptom:** Alexa can’t find devices.
 
-Command Topics (MQTT → Bridge)
-
-rti/ad8x/all/set/all_off → 1
-
-rti/ad8x/<amp>/zone/<zone>/set/power → on / off
-
-rti/ad8x/<amp>/zone/<zone>/set/mute → on / off / toggle
-
-rti/ad8x/<amp>/zone/<zone>/set/source → 1..8
-
-rti/ad8x/<amp>/zone/<zone>/set/volume → (0–75)
-
-rti/ad8x/<amp>/zone/<zone>/set/bass → -12..12
-
-rti/ad8x/<amp>/zone/<zone>/set/treble → -12..12
-
-rti/ad8x/<amp>/zone/<zone>/set/volume_up
-
-rti/ad8x/<amp>/zone/<zone>/set/volume_down
-
-rti/ad8x/<amp>/zone/<zone>/set/bass_up
-
-rti/ad8x/<amp>/zone/<zone>/set/bass_down
-
-rti/ad8x/<amp>/zone/<zone>/set/treble_up
-
-rti/ad8x/<amp>/zone/<zone>/set/treble_down
-
-MQTT Discovery Prefix: homeassistant/
-Example (power switch) discovery topic: homeassistant/switch/rti_ad8x/amp1_zone1_power/config
-Example payload shape (abridged):
-
-{
-  "name": "Amp1 Zone1 Power",
-  "unique_id": "rti_ad8x_amp1_zone1_power",
-  "state_topic": "rti/ad8x/amp1/zone/1/power",
-  "command_topic": "rti/ad8x/amp1/zone/1/set/power",
-  "payload_on": "on",
-  "payload_off": "off",
-  "device": {
-    "identifiers": ["rti_ad8x_amp1"],
-    "manufacturer": "RTI",
-    "model": "AD-8x",
-    "name": "RTI AD-8x (Amp1)"
-  }
-}
-🧩 Entity Naming Pattern
-
-switch.rti_ad_8x_amp{1|2}{zone}power
-
-switch.rti_ad_8x_amp{1|2}{zone}mute
-
-number.rti_ad_8x_amp{1|2}{zone}volume
-
-number.rti_ad_8x_amp{1|2}{zone}bass
-
-number.rti_ad_8x_amp{1|2}{zone}_treble
-Use this pattern for template lights, automations, and scripts.
-
-🧪 Troubleshooting
-
-No Sonos favorites? Open a Sonos media_player and confirm source_list is populated. Restart Sonos or HA if empty.
-
-Nothing responds in HA?
-
-Watch MQTT: mosquitto_sub -v -t 'rti/ad8x/#'
-
-Check service: journalctl -u rti-ad8x-bridge -f
-
-Alexa can’t find devices? Ensure template lights are exposed via Nabu Casa and run Alexa discovery again.
-
-Network quirks (Sonos/HA/RTI): Keep them on the same VLAN; enable IGMP Snooping; avoid cross-subnet mDNS unless you’ve configured relays.
-
-🛠️ Optional Bridge Tweaks (Quality of Life)
-
-Tone control rate-limit/coalesce: Per-zone debounce ~200–300 ms, max ~2–4 updates/sec. Coalesce rapid ± taps into a single absolute set.
-
-Power-aware commands (recommended): Don’t let volume/bass/treble power a zone on unintentionally.
-
-Retry/backoff: Short, bounded retries on transient socket timeouts; mark bridge/status = offline during outages.
-
-🗒️ Changelog (excerpt)
-
-v1.4.0 — Network Failover: Adds logic to detect amp network freezes and publish an MQTT message for external automations to trigger a switch power cycle.
-
-v1.1.x — iPhone-optimized dashboards noted. Template lights with safe volume clamp 5–40 (AD-8x scale 0–75). Documented tone-control latency + bridge-side smoothing suggestions. Discrete ± commands; fail-fast reconnects; global All Off.
-
+**Fix:** Ensure the `light.kitchen_speakers` entities are exposed via Nabu Casa and run an Alexa discovery again.
