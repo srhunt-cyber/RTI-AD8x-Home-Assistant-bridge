@@ -1,7 +1,17 @@
 #!/usr/bin/env python3
 """
 RTI AD-8x <-> MQTT bridge
-Version 1.8.0 (2025-11-15)
+Version 1.8.3 (2026-09-16)
+
+- STABILITY (v1.8.3): Stagger Amp 2 startup by five seconds so the two
+  fragile Telnet servers are not polled in lockstep.
+- STABILITY (v1.8.3): Close a failed Telnet socket immediately and allow
+  five seconds before the first reconnect attempt.
+- FIX (v1.8.2): Publish retained network status on actual full-poll
+  transitions, including an initial "up" after service startup.
+- OPERATIONS (v1.8.2): Include the date in log timestamps.
+- REFINED (v1.8.1): Use the amp IP address in its Home Assistant device name
+  and publish the bridge software version through MQTT discovery.
 
 - NEW: Added instrumentation and diagnostics, mirroring the vantage-bridge.
   The bridge now publishes CPU, memory, uptime, and connection status
@@ -33,7 +43,7 @@ LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
 logging.basicConfig(
     level=getattr(logging, LOG_LEVEL, logging.INFO),
     format="%(asctime)s.%(msecs)03d %(levelname)s:%(name)s:%(message)s",
-    datefmt="%H:%M:%S",
+    datefmt="%Y-%m-%d %H:%M:%S",
 )
 log = logging.getLogger("rti_ad8x_bridge")
 print("RTI Bridge starting up…")
@@ -66,6 +76,8 @@ INTER_CMD_SLEEP   = float(os.getenv("INTER_CMD_SLEEP", "0.1"))
 SET_RETRIES       = int(os.getenv("SET_RETRIES", "2"))
 RETRY_SLEEP       = float(os.getenv("RETRY_SLEEP", "0.2"))
 DUMP_RAW_CHUNKS   = os.getenv("DUMP_RAW_CHUNKS", "1") not in ("0", "false", "False")
+RECONNECT_BACKOFF_INITIAL = float(os.getenv("RECONNECT_BACKOFF_INITIAL", "5.0"))
+AMP2_START_STAGGER_SEC    = float(os.getenv("AMP2_START_STAGGER_SEC", "5.0"))
 
 VOL_COALESCE_SEC        = float(os.getenv("VOL_COALESCE_SEC", "1.2"))
 VOL_ECHO_SUPPRESS_SEC   = float(os.getenv("VOL_ECHO_SUPPRESS_SEC", "1.00"))
@@ -103,13 +115,21 @@ def _encode_tone(level: int) -> str:
 
 def slugify(s: str) -> str: return "".join(ch.lower() if ch.isalnum() else "_" for ch in s).strip("_")
 def discovery_topic(component: str, object_id: str) -> str: return f"{DISCOVERY_PREFIX}/{component}/{object_id}/config"
-def device_block(amp_key: str) -> dict: return {"identifiers": [f"ad8x_{amp_key}"], "manufacturer": "RTI", "model": "AD-8x", "name": f"RTI AD-8x ({amp_key})"}
+def device_block(amp_key: str, amp_ip: str) -> dict:
+    return {
+        "identifiers": [f"ad8x_{amp_key}"],
+        "manufacturer": "RTI",
+        "model": "AD-8x",
+        "name": f"RTI AD-8x ({amp_ip})",
+        "sw_version": "1.8.3",
+    }
 def zone_object_id(amp_key: str, zone: int, suffix: str) -> str:
     name = ZONE_NAMES.get(amp_key, {}).get(zone, f"Zone {zone}")
     return slugify(f"ad8x_{amp_key}_{name}_{suffix}")
 
 class AmpSession(threading.Thread):
-    def __init__(self, amp_name: str, addr: Tuple[str, int], mqttc: mqtt.Client):
+    def __init__(self, amp_name: str, addr: Tuple[str, int], mqttc: mqtt.Client,
+                 start_delay: float = 0.0):
         super().__init__(daemon=True)
         self.amp_name = amp_name
         self.addr = addr
@@ -123,7 +143,8 @@ class AmpSession(threading.Thread):
         self._last_heartbeat_ts = 0.0
         self._zone_states: dict[int, dict] = {}
         self._consecutive_failures = 0
-        self._is_down_published = False
+        self._network_status = None
+        self.start_delay = max(0.0, float(start_delay))
 
     def _cleanup_socket(self):
         """Closes the socket and clears the buffer without resetting state."""
@@ -160,7 +181,6 @@ class AmpSession(threading.Thread):
         was = self.connected
         self.connected = False
         self._consecutive_failures = 0
-        self._is_down_published = False
         self._cleanup_socket()
         if was:
             self._pub_availability("offline")
@@ -419,29 +439,37 @@ class AmpSession(threading.Thread):
         if self._consecutive_failures > 0:
              log.info(f"[{self.amp_name}] Amp communication restored.")
         self._consecutive_failures = 0
-        if self._is_down_published:
-            self._is_down_published = False
+        if self._network_status != "up":
+            status_topic = f"{MQTT_BASE}/network_status/{self.amp_name}"
+            self.mqttc.publish(status_topic, "up", retain=True)
+            self._network_status = "up"
+            log.info(f"[{self.amp_name}] Published network status: up")
 
     def _handle_poll_failure(self):
         """Increments failure counter and publishes 'down' message if threshold is met."""
         self._consecutive_failures += 1
         log.warning(f"[{self.amp_name}] Poll failed. Consecutive failures: {self._consecutive_failures}")
         self.connected = False # Mark as disconnected to force a reconnect attempt
+        # The AD-8x Telnet service can take several seconds to release a failed
+        # session. Close our side now, before waiting and reconnecting.
+        self._cleanup_socket()
         
-        if self._consecutive_failures >= 3 and not self._is_down_published:
+        if self._consecutive_failures >= 3 and self._network_status != "down":
             log.error(f"[{self.amp_name}] Exceeded poll failure threshold. Publishing 'down' message.")
             down_topic = f"{MQTT_BASE}/network_status/{self.amp_name}"
             self.mqttc.publish(down_topic, "down", retain=True)
-            self._is_down_published = True
+            self._network_status = "down"
 
     def run(self):
-        backoff = 1.0
+        if self.start_delay and self.stop_flag.wait(self.start_delay):
+            return
+        backoff = RECONNECT_BACKOFF_INITIAL
         while not self.stop_flag.is_set():
             if self._poll_once():
-                backoff = 1.0
-                time.sleep(POLL_INTERVAL_SEC)
+                backoff = RECONNECT_BACKOFF_INITIAL
+                self.stop_flag.wait(POLL_INTERVAL_SEC)
             else:
-                time.sleep(backoff); backoff = min(30.0, backoff * 2)
+                self.stop_flag.wait(backoff); backoff = min(30.0, backoff * 2)
 
     def stop(self): self.stop_flag.set(); self._close()
 
@@ -459,8 +487,8 @@ class Bridge:
         # --- INSTRUMENTATION ---
 
     def publish_discovery(self):
-        for amp_key in AMPS.keys():
-            avail_t = self._topic(amp_key, "status"); dev = device_block(amp_key)
+        for amp_key, (amp_ip, amp_port) in AMPS.items():
+            avail_t = self._topic(amp_key, "status"); dev = device_block(amp_key, amp_ip)
             for z in range(1, 9):
                 zname = ZONE_NAMES.get(amp_key, {}).get(z, f"Zone {z}")
                 base = self._topic(amp_key, "zone", z); cmd_base = f"{base}/set"
@@ -544,7 +572,9 @@ class Bridge:
         # --- INSTRUMENTATION ---
 
         for name, addr in AMPS.items():
-            s = AmpSession(name, addr, self.client); self.sessions[name] = s; s.start()
+            start_delay = AMP2_START_STAGGER_SEC if name == "amp2" else 0.0
+            s = AmpSession(name, addr, self.client, start_delay=start_delay)
+            self.sessions[name] = s; s.start()
             log.info(f"Started AmpSession {name} -> {addr[0]}:{addr[1]}")
     def stop(self):
         for s in self.sessions.values(): s.stop()

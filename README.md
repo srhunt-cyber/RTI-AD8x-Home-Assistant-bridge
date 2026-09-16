@@ -8,6 +8,15 @@ The core of the project is a Python-based service that provides a two-way bridge
 
 This repository contains the Python bridge script. The documentation below explains how to set it up and how to integrate it with other Home Assistant components like Sonos and Alexa for a complete solution.
 
+### Why the bridge runs outside Home Assistant
+
+An early version ran the Python connection directly inside Home Assistant. In practice, that was unreliable. The AD-8x Ethernet control interface behaves like a slow serial device exposed through TCP: it accepts only one client, silently drops commands sent too quickly, and may briefly refuse a reconnect after a socket closes.
+
+The dedicated bridge gives each amplifier one long-lived connection owner and handles command pacing, polling, reconnects, and MQTT state independently of Home Assistant restarts or integration reloads. Home Assistant communicates with the bridge through MQTT rather than opening its own AD-8x connection.
+
+> [!IMPORTANT]
+> Each AD-8x accepts only one TCP client on port 23. Close the amplifier web client, Telnet/netcat sessions, RTI test utilities, and any other IP integration before starting this bridge. A second connection will usually receive `Connection refused` or time out.
+
 ## ✨ Key Features
 
 * **Full RTI Zone Control:** Power, Mute, Source, Volume, Bass, & Treble for all 16 zones.
@@ -17,7 +26,7 @@ This repository contains the Python bridge script. The documentation below expla
 * **Complete Alexa Voice Control:** (Requires Nabu Casa) On/off and safe, clamped volume via virtual template lights.
 * **Optimistic UI:** Dashboards update instantly; commands don't wait for amp confirmation.
 * **Global "All Off" Command:** Listens on `rti/ad8x/all/command` for an `OFF` payload to turn all 16 zones off.
-* **Robust Connection:** Detects amp network failures after 3 missed polls and publishes a "down" message for external automations.
+* **Robust Connection:** Closes failed sockets, allows the AD-8x time to release its single-client port, and publishes retained `up`/`down` state after successful or failed polling cycles.
 
 ---
 
@@ -28,7 +37,7 @@ This section covers installing the Python bridge script on its Linux host (e.g.,
 ### 1. Clone the Repository
 
 ```bash
-git clone [https://github.com/srhunt-cyber/RTI-AD8x-Home-Assistant-bridge.git](https://github.com/srhunt-cyber/RTI-AD8x-Home-Assistant-bridge.git)
+git clone https://github.com/srhunt-cyber/RTI-AD8x-Home-Assistant-bridge.git
 cd RTI-AD8x-Home-Assistant-bridge
 ```
 
@@ -50,7 +59,7 @@ This script requires Python packages. The `requirements.txt` file lists all depe
 
 ```bash
 # Install all required packages
-pip install -r requirements.txt
+pip install -r bridge/requirements.txt
 ```
 
 Your `requirements.txt` file should contain:
@@ -61,24 +70,14 @@ psutil
 
 ### 4. Configure the Bridge
 
-First, copy the example environment file:
-
-```bash
-cp .env.example .env
-```
-
-Now, edit the `.env` file to add your MQTT broker details:
-```bash
-nano .env
-```
+Set these values with `Environment=` lines in the systemd service, or edit the defaults near the top of `bridge/rti_ad8x_bridge.py`:
 ```ini
-# .env
-MQTT_HOST=your-broker-ip
-MQTT_USER=your-mqtt-user
-MQTT_PASS=your-mqtt-password
+Environment="MQTT_HOST=your-broker-ip"
+Environment="MQTT_USER=your-mqtt-user"
+Environment="MQTT_PASS=your-mqtt-password"
 ```
 
-You must also **edit the `rti_ad8x_mqtt_bridge.py` script** to set the static IP addresses for your amplifiers in the `AMPS` dictionary at the top of the file.
+You must also edit `bridge/rti_ad8x_bridge.py` to set the static IP addresses for your amplifiers in the `AMPS` dictionary near the top of the file.
 
 ### 5. Set Up the `systemd` Service
 
@@ -98,7 +97,7 @@ After=network-online.target
 [Service]
 User=YOUR_USER
 WorkingDirectory=/home/YOUR_USER/RTI-AD8x-Home-Assistant-bridge
-ExecStart=/home/YOUR_USER/RTI-AD8x-Home-Assistant-bridge/.venv/bin/python rti_ad8x_mqtt_bridge.py
+ExecStart=/home/YOUR_USER/RTI-AD8x-Home-Assistant-bridge/.venv/bin/python bridge/rti_ad8x_bridge.py
 Restart=always
 RestartSec=10
 
@@ -276,6 +275,16 @@ The dashboards shown in this project's screenshots rely on the `custom:button-ca
 
 ## 🧪 Troubleshooting
 
+**Symptom:** The log shows `connect failed: [Errno 111] Connection refused` or repeated connection timeouts.
+
+**Cause:** The AD-8x accepts only one TCP client on port 23 and can take several seconds to release that slot after a disconnect. Its web client or another integration may also be holding the connection.
+
+**Fix:**
+1. Close the AD-8x web client and every manual Telnet/netcat session.
+2. Confirm no other automation or RTI IP driver is connecting to the same amplifier.
+3. Restart this bridge once. Do not repeatedly restart or automatically power-cycle the amplifier for a single failed poll.
+4. With v1.8.3, isolated `Consecutive failures: 1` messages can occur and recover normally. Investigate when failures reach 3 and a retained `down` status is published.
+
 **Symptom:** The service fails to start, and `journalctl -u rti-ad8x-mqtt-bridge.service` shows `-- No entries --`.
 
 **Cause:** This almost always means a Python error is happening on import, before logging is set up. The most common cause is a missing dependency (like `psutil`).
@@ -284,8 +293,8 @@ The dashboards shown in this project's screenshots rely on the `custom:button-ca
 1.  Stop the service: `sudo systemctl stop rti-ad8x-mqtt-bridge.service`
 2.  Go to the script directory: `cd /home/YOUR_USER/RTI-AD8x-Home-Assistant-bridge`
 3.  Activate the virtual environment: `source .venv/bin/activate`
-4.  Install dependencies: `pip install -r requirements.txt`
-5.  Test run it manually: `python rti_ad8x_mqtt_bridge.py`
+4.  Install dependencies: `pip install -r bridge/requirements.txt`
+5.  Test run it manually: `python bridge/rti_ad8x_bridge.py`
 6.  If it runs, `CTRL+C` and restart the service: `sudo systemctl start rti-ad8x-mqtt-bridge.service`
 
 **Symptom:** Nothing responds in Home Assistant.
