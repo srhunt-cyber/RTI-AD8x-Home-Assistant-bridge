@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
 """
 RTI AD-8x <-> MQTT bridge
-Version 1.8.3 (2026-09-16)
+Version 1.8.4 (2026-09-16)
 
+- STABILITY (v1.8.4): Use the field-tested HA-only polling profile by
+  default: 60-second reconciliation polls, 200ms command spacing, and a
+  3-second reply timeout. HA and Alexa commands still execute immediately.
 - STABILITY (v1.8.3): Stagger Amp 2 startup by five seconds so the two
   fragile Telnet servers are not polled in lockstep.
 - STABILITY (v1.8.3): Close a failed Telnet socket immediately and allow
@@ -68,11 +71,11 @@ MQTT_PASS = os.getenv("MQTT_PASS", "")
 MQTT_BASE = os.getenv("MQTT_BASE", "rti/ad8x")
 DISCOVERY_PREFIX = os.getenv("DISCOVERY_PREFIX", "homeassistant")
 
-POLL_INTERVAL_SEC = float(os.getenv("POLL_INTERVAL", "20.0"))
+POLL_INTERVAL_SEC = float(os.getenv("POLL_INTERVAL", "60.0"))
 CONNECT_TIMEOUT   = float(os.getenv("CONNECT_TIMEOUT", "2.0"))
-PER_CMD_TIMEOUT   = float(os.getenv("PER_CMD_TIMEOUT", "2.0"))
+PER_CMD_TIMEOUT   = float(os.getenv("PER_CMD_TIMEOUT", "3.0"))
 POST_SEND_SETTLE  = float(os.getenv("POST_SEND_SETTLE", "0.05"))
-INTER_CMD_SLEEP   = float(os.getenv("INTER_CMD_SLEEP", "0.1"))
+INTER_CMD_SLEEP   = float(os.getenv("INTER_CMD_SLEEP", "0.20"))
 SET_RETRIES       = int(os.getenv("SET_RETRIES", "2"))
 RETRY_SLEEP       = float(os.getenv("RETRY_SLEEP", "0.2"))
 DUMP_RAW_CHUNKS   = os.getenv("DUMP_RAW_CHUNKS", "1") not in ("0", "false", "False")
@@ -121,7 +124,7 @@ def device_block(amp_key: str, amp_ip: str) -> dict:
         "manufacturer": "RTI",
         "model": "AD-8x",
         "name": f"RTI AD-8x ({amp_ip})",
-        "sw_version": "1.8.3",
+        "sw_version": "1.8.4",
     }
 def zone_object_id(amp_key: str, zone: int, suffix: str) -> str:
     name = ZONE_NAMES.get(amp_key, {}).get(zone, f"Zone {zone}")

@@ -17,6 +17,29 @@ The dedicated bridge gives each amplifier one long-lived connection owner and ha
 > [!IMPORTANT]
 > Each AD-8x accepts only one TCP client on port 23. Close the amplifier web client, Telnet/netcat sessions, RTI test utilities, and any other IP integration before starting this bridge. A second connection will usually receive `Connection refused` or time out.
 
+### HA-only operating model
+
+The reference installation now uses Home Assistant and this MQTT bridge as the
+only day-to-day control path. Its former RTI XP-8v connection over RS-232 and
+the legacy RTI control app have been retired. This matters because the bridge
+no longer needs to poll rapidly to discover state changes made by a parallel
+controller.
+
+For this HA-only model, the recommended systemd environment is:
+
+```ini
+Environment="POLL_INTERVAL=60"
+Environment="INTER_CMD_SLEEP=0.20"
+Environment="PER_CMD_TIMEOUT=3.0"
+```
+
+Commands originating in HA or Alexa still go to the amplifier immediately and
+are confirmed by a zone query. The 60-second interval applies only to background
+reconciliation, so a physical reboot or a change made outside HA can take up to
+about one minute to appear. If an installation still uses an RTI processor,
+RS-232 controller, or another application in parallel, choose a shorter poll
+interval based on how quickly those external changes must appear in HA.
+
 ## ✨ Key Features
 
 * **Full RTI Zone Control:** Power, Mute, Source, Volume, Bass, & Treble for all 16 zones.
@@ -26,7 +49,7 @@ The dedicated bridge gives each amplifier one long-lived connection owner and ha
 * **Complete Alexa Voice Control:** (Requires Nabu Casa) On/off and safe, clamped volume via virtual template lights.
 * **Optimistic UI:** Dashboards update instantly; commands don't wait for amp confirmation.
 * **Global "All Off" Command:** Listens on `rti/ad8x/all/command` for an `OFF` payload to turn all 16 zones off.
-* **Robust Connection:** Closes failed sockets, allows the AD-8x time to release its single-client port, and publishes retained `up`/`down` state after successful or failed polling cycles.
+* **Robust Connection:** Uses conservative HA-only polling defaults, closes failed sockets, allows the AD-8x time to release its single-client port, and publishes retained `up`/`down` state after successful or failed polling cycles.
 
 ---
 
@@ -75,6 +98,9 @@ Set these values with `Environment=` lines in the systemd service, or edit the d
 Environment="MQTT_HOST=your-broker-ip"
 Environment="MQTT_USER=your-mqtt-user"
 Environment="MQTT_PASS=your-mqtt-password"
+Environment="POLL_INTERVAL=60"
+Environment="INTER_CMD_SLEEP=0.20"
+Environment="PER_CMD_TIMEOUT=3.0"
 ```
 
 You must also edit `bridge/rti_ad8x_bridge.py` to set the static IP addresses for your amplifiers in the `AMPS` dictionary near the top of the file.
@@ -283,7 +309,7 @@ The dashboards shown in this project's screenshots rely on the `custom:button-ca
 1. Close the AD-8x web client and every manual Telnet/netcat session.
 2. Confirm no other automation or RTI IP driver is connecting to the same amplifier.
 3. Restart this bridge once. Do not repeatedly restart or automatically power-cycle the amplifier for a single failed poll.
-4. With v1.8.3, isolated `Consecutive failures: 1` messages can occur and recover normally. Investigate when failures reach 3 and a retained `down` status is published.
+4. With v1.8.4, isolated `Consecutive failures: 1` messages can occur and recover normally. Investigate when failures reach 3 and a retained `down` status is published.
 
 **Symptom:** The service fails to start, and `journalctl -u rti-ad8x-mqtt-bridge.service` shows `-- No entries --`.
 

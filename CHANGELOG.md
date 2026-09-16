@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.8.4 — 2026-09-16
+
+- Change the default HA-only operating profile to `POLL_INTERVAL=60`,
+  `INTER_CMD_SLEEP=0.20`, and `PER_CMD_TIMEOUT=3.0`. This reduces background
+  load on the fragile AD-8x Telnet server while leaving HA and Alexa commands
+  immediate.
+- Document Home Assistant/MQTT as the sole day-to-day control path. The former
+  RTI XP-8v/RS-232 control path and legacy RTI app are retired in this
+  deployment.
+- Retain the v1.8.3 failed-socket cleanup, five-second reconnect delay, and
+  staggered amplifier startup.
+- During initial live validation, individual incomplete polls recovered on the
+  next cycle without connection-refusal storms or retained `down` transitions.
+- A parallel controller can change amplifier state without MQTT knowing about
+  it until the next poll. Installations that retain an RTI processor, serial
+  controller, or another control application may need a shorter poll interval.
+
 ## 1.8.3 — 2026-09-16
 
 - Close a failed amplifier socket immediately so the AD-8x can release its single TCP client slot.
