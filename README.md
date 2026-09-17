@@ -1,8 +1,15 @@
 # RTI AD-8x MQTT Bridge & Home Assistant Integration
 
+> [!NOTE]
+> An optional **v1.9 beta** adds YAML configuration, a guided Linux installer,
+> Docker Compose, and an experimental Home Assistant app/add-on. Stable v1.8.4
+> remains unchanged. See [the beta deployment guide](docs/BETA_1.9.md).
+
 ## ✅ Project Overview
 
-This project replaces legacy control apps with a modern, unified Home Assistant (HA) interface. It integrates two RTI AD-8x amplifiers (16 zones) and multiple Sonos players into a single, seamless multi-room music control system.
+This project replaces legacy control apps with a modern, unified Home Assistant
+(HA) interface. It supports multiple RTI AD-series amplifiers, configurable
+zones, and MQTT Discovery for a seamless multi-room music control system.
 
 The core of the project is a Python-based service that provides a two-way bridge between the RTI amplifiers and an MQTT broker, enabling full integration with Home Assistant via MQTT Discovery.
 
@@ -42,110 +49,52 @@ interval based on how quickly those external changes must appear in HA.
 
 ## ✨ Key Features
 
-* **Full RTI Zone Control:** Power, Mute, Source, Volume, Bass, & Treble for all 16 zones.
+* **Full RTI Zone Control:** Power, Mute, Source, Volume, Bass, & Treble for each configured zone.
 * **Home Assistant Auto-Discovery:** Bridge publishes RTI entities so HA picks them up automatically.
 * **Service Health Monitoring:** Publishes bridge health stats (CPU, memory, uptime, amp connection status) to MQTT for monitoring.
 * **Dynamic Sonos Favorites:** (Requires Pyscript) Auto-scans Sonos favorites and populates a dropdown in HA.
 * **Complete Alexa Voice Control:** (Requires Nabu Casa) On/off and safe, clamped volume via virtual template lights.
 * **Optimistic UI:** Dashboards update instantly; commands don't wait for amp confirmation.
-* **Global "All Off" Command:** Listens on `rti/ad8x/all/command` for an `OFF` payload to turn all 16 zones off.
+* **Global "All Off" Command:** Listens on `rti/ad8x/all/command` for an `OFF` payload to turn all configured zones off.
 * **Robust Connection:** Uses conservative HA-only polling defaults, closes failed sockets, allows the AD-8x time to release its single-client port, and publishes retained `up`/`down` state after successful or failed polling cycles.
 
 ---
 
 ## 🚀 Part 1: Bridge Installation & Setup
 
-This section covers installing the Python bridge script on its Linux host (e.g., `rtipoll.local`).
+The v1.9 beta offers three deployment choices. The complete commands,
+compatibility rules, and rollback procedure are in
+[the beta deployment guide](docs/BETA_1.9.md).
 
-### 1. Clone the Repository
-
-```bash
-git clone https://github.com/srhunt-cyber/RTI-AD8x-Home-Assistant-bridge.git
-cd RTI-AD8x-Home-Assistant-bridge
-```
-
-### 2. Create a Virtual Environment
-
-It is highly recommended to use a Python virtual environment.
+### Guided Debian/Ubuntu installation
 
 ```bash
-# Create the virtual environment
-python3 -m venv .venv
-
-# Activate it
-source .venv/bin/activate
+sudo ./scripts/install.sh
 ```
 
-### 3. Install Dependencies
+The installer asks whether you already have an MQTT broker. It can install an
+authenticated Mosquitto broker if needed, prompts for the amplifier and zone
+layout, validates the resulting YAML, and installs the systemd service.
 
-This script requires Python packages. The `requirements.txt` file lists all dependencies.
+### Docker Compose sidecar
 
 ```bash
-# Install all required packages
-pip install -r bridge/requirements.txt
+cp config.example.yaml config.yaml
+# Edit config.yaml.
+docker compose up -d --build
 ```
 
-Your `requirements.txt` file should contain:
-```
-paho-mqtt
-psutil
-```
+### Home Assistant app/add-on
 
-### 4. Configure the Bridge
+The experimental app package is in `rti_ad_series_bridge_beta`. It uses a YAML
+file in the app configuration directory and expects an existing MQTT broker.
+See its `DOCS.md` before starting it.
 
-Set these values with `Environment=` lines in the systemd service, or edit the defaults near the top of `bridge/rti_ad8x_bridge.py`:
-```ini
-Environment="MQTT_HOST=your-broker-ip"
-Environment="MQTT_USER=your-mqtt-user"
-Environment="MQTT_PASS=your-mqtt-password"
-Environment="POLL_INTERVAL=60"
-Environment="INTER_CMD_SLEEP=0.20"
-Environment="PER_CMD_TIMEOUT=3.0"
-```
-
-You must also edit `bridge/rti_ad8x_bridge.py` to set the static IP addresses for your amplifiers in the `AMPS` dictionary near the top of the file.
-
-### 5. Set Up the `systemd` Service
-
-Create a `systemd` service file to keep the bridge running in the background.
+For every deployment, validate a configuration without connecting to an amp:
 
 ```bash
-sudo nano /etc/systemd/system/rti-ad8x-mqtt-bridge.service
+python bridge/rti_ad8x_bridge.py --config config.yaml --check-config
 ```
-
-Paste the following configuration. **Remember to change `YOUR_USER`** and the `WorkingDirectory`/`ExecStart` paths if you cloned the repo to a different location.
-
-```ini
-[Unit]
-Description=RTI AD-8x MQTT Bridge Service
-After=network-online.target
-
-[Service]
-User=YOUR_USER
-WorkingDirectory=/home/YOUR_USER/RTI-AD8x-Home-Assistant-bridge
-ExecStart=/home/YOUR_USER/RTI-AD8x-Home-Assistant-bridge/.venv/bin/python bridge/rti_ad8x_bridge.py
-Restart=always
-RestartSec=10
-
-[Install]
-WantedBy=multi-user.target
-```
-
-Finally, enable and start the new service:
-
-```bash
-# Reload systemd to find the new service
-sudo systemctl daemon-reload
-
-# Enable the service to start on boot
-sudo systemctl enable rti-ad8x-mqtt-bridge.service
-
-# Start the service now
-sudo systemctl start rti-ad8x-mqtt-bridge.service
-```
-
-You can check the logs at any time with:
-`journalctl -u rti-ad8x-mqtt-bridge.service -f`
 
 ---
 

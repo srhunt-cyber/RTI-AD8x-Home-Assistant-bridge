@@ -1,0 +1,78 @@
+# RTI AD-series MQTT Bridge configuration
+schema_version: 1
+
+bridge:
+  log_level: INFO
+  health_check_interval: 30
+
+mqtt:
+  host: 192.168.1.10
+  port: 1883
+  username: ""
+  # A literal password works, or use ${RTI_MQTT_PASSWORD} and set that variable.
+  password: ""
+  base_topic: rti/ad8x
+  discovery_prefix: homeassistant
+
+polling:
+  interval: 60
+  connect_timeout: 2
+  reply_timeout: 3
+  inter_command_delay: 0.20
+  reconnect_delay: 5
+  failure_threshold: 3
+
+commands:
+  post_send_settle: 0.05
+  retries: 2
+  retry_delay: 0.2
+  coalesce_window: 1.2
+  echo_suppress: 1.0
+  power_on_fallback_volume: 65
+
+home_assistant:
+  discovery: true
+  # Leave false to preserve the numeric source options used by v1.8.x.
+  use_source_names: false
+
+amps:
+  - id: amp1
+    name: Main Floor Amplifier
+    model: AD-8x
+    host: 192.168.1.82
+    port: 23
+    startup_delay: 0
+    sources:
+      1: Sonos 1
+      2: Sonos 2
+      3: Source 3
+      4: Source 4
+      5: Source 5
+      6: Source 6
+      7: Source 7
+      8: Source 8
+    zones:
+      1: Kitchen
+      2: Great Room
+      3: Upper Deck
+      4: Primary Bedroom
+      5: Primary Bathroom
+      6: Guest Room
+      7: Office
+      8: Craft Room
+
+  - id: amp2
+    name: Lower Floor Amplifier
+    model: AD-8x
+    host: 192.168.1.61
+    port: 23
+    startup_delay: 5
+    zones:
+      1: Laundry
+      2: Lower Bar
+      3: Recreation Room
+      4: Lower Guest
+      5: Fitness
+      6: Walkout
+      7: Pool
+      8: Patio

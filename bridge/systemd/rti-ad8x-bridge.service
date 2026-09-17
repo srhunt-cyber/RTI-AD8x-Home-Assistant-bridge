@@ -1,16 +1,18 @@
 [Unit]
-Description=RTI AD-8x ↔ MQTT Bridge
-After=network-online.target mosquitto.service
+Description=RTI AD-series MQTT Bridge
+After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
-User=root
-EnvironmentFile=-/etc/default/rti-ad8x-bridge
+User=rti-ad8x
+Group=rti-ad8x
+Environment=RTI_CONFIG=/etc/rti-ad8x-bridge/config.yaml
+EnvironmentFile=-/etc/rti-ad8x-bridge/environment
 WorkingDirectory=/opt/rti-ad8x-bridge
-ExecStart=/opt/rti-ad8x-bridge/venv/bin/python /opt/rti-ad8x-bridge/bridge/rti_ad8x_bridge.py
-Restart=on-failure
-RestartSec=3
+ExecStart=/opt/rti-ad8x-bridge/.venv/bin/python /opt/rti-ad8x-bridge/bridge/rti_ad8x_bridge.py
+Restart=always
+RestartSec=10
 SyslogIdentifier=rti-ad8x-bridge
 NoNewPrivileges=true
 ProtectSystem=full

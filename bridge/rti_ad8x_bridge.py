@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-RTI AD-8x <-> MQTT bridge
-Version 1.8.4 (2026-09-16)
+RTI AD-series <-> MQTT bridge
+Version 1.9.0-beta.1 (2026-09-17)
 
 - STABILITY (v1.8.4): Use the field-tested HA-only polling profile by
   default: 60-second reconciliation polls, 200ms command spacing, and a
@@ -32,9 +32,11 @@ Version 1.8.4 (2026-09-16)
   to better handle rapid button taps.
 """
 
-import os, sys, time, json, random, signal, socket, logging, traceback, threading
+import argparse, os, sys, time, json, random, signal, socket, logging, traceback, threading
+from pathlib import Path
 from typing import Optional, Tuple
 import paho.mqtt.client as mqtt
+from config import ConfigError, load_config
 # --- INSTRUMENTATION ---
 import psutil # REQUIRED FOR METRICS
 # --- INSTRUMENTATION ---
@@ -42,6 +44,7 @@ import psutil # REQUIRED FOR METRICS
 # ─────────────────────────────────────────────────────────────────────────────
 # LOGGING
 # ─────────────────────────────────────────────────────────────────────────────
+VERSION = "1.9.0-beta.1"
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
 logging.basicConfig(
     level=getattr(logging, LOG_LEVEL, logging.INFO),
@@ -49,20 +52,14 @@ logging.basicConfig(
     datefmt="%Y-%m-%d %H:%M:%S",
 )
 log = logging.getLogger("rti_ad8x_bridge")
-print("RTI Bridge starting up…")
 
 # ─────────────────────────────────────────────────────────────────────────────
 # CONFIG
 # ─────────────────────────────────────────────────────────────────────────────
-AMPS = {
-    "amp1": ("192.168.1.82", 23),
-    "amp2": ("192.168.1.61", 23),
-}
-
-ZONE_NAMES = {
-    "amp1": { 1: "Kitchen", 2: "Great Room", 3: "Upper Deck", 4: "Master Bed", 5: "Master Bath", 6: "Mom's Room", 7: "Office", 8: "Craft Room" },
-    "amp2": { 1: "Laundry", 2: "Lower Bar", 3: "Golf Room", 4: "Lower Guest", 5: "Fitness", 6: "Walkout", 7: "Pool", 8: "Patio" },
-}
+AMPS = {}
+AMP_METADATA = {}
+ZONE_NAMES = {}
+SOURCE_NAMES = {}
 
 MQTT_HOST = os.getenv("MQTT_HOST", "rtipoll.local")
 MQTT_PORT = int(os.getenv("MQTT_PORT", "1883"))
@@ -80,14 +77,97 @@ SET_RETRIES       = int(os.getenv("SET_RETRIES", "2"))
 RETRY_SLEEP       = float(os.getenv("RETRY_SLEEP", "0.2"))
 DUMP_RAW_CHUNKS   = os.getenv("DUMP_RAW_CHUNKS", "1") not in ("0", "false", "False")
 RECONNECT_BACKOFF_INITIAL = float(os.getenv("RECONNECT_BACKOFF_INITIAL", "5.0"))
-AMP2_START_STAGGER_SEC    = float(os.getenv("AMP2_START_STAGGER_SEC", "5.0"))
+NETWORK_FAILURE_THRESHOLD = int(os.getenv("NETWORK_FAILURE_THRESHOLD", "3"))
 
 VOL_COALESCE_SEC        = float(os.getenv("VOL_COALESCE_SEC", "1.2"))
 VOL_ECHO_SUPPRESS_SEC   = float(os.getenv("VOL_ECHO_SUPPRESS_SEC", "1.00"))
 
 # --- INSTRUMENTATION ---
 HEALTH_CHECK_INTERVAL = 30.0 # Interval for sending metrics and heartbeat
+HA_DISCOVERY = True
+USE_SOURCE_NAMES = False
+POWER_ON_FALLBACK_VOLUME = 65
 # --- INSTRUMENTATION ---
+
+
+def configure_runtime(config: dict):
+    """Apply validated YAML while retaining v1.8 environment overrides."""
+    global LOG_LEVEL, AMPS, AMP_METADATA, ZONE_NAMES, SOURCE_NAMES
+    global MQTT_HOST, MQTT_PORT, MQTT_USER, MQTT_PASS, MQTT_BASE, DISCOVERY_PREFIX
+    global POLL_INTERVAL_SEC, CONNECT_TIMEOUT, PER_CMD_TIMEOUT, POST_SEND_SETTLE
+    global INTER_CMD_SLEEP, SET_RETRIES, RETRY_SLEEP, DUMP_RAW_CHUNKS
+    global RECONNECT_BACKOFF_INITIAL, NETWORK_FAILURE_THRESHOLD
+    global VOL_COALESCE_SEC, VOL_ECHO_SUPPRESS_SEC, HEALTH_CHECK_INTERVAL
+    global HA_DISCOVERY, USE_SOURCE_NAMES, POWER_ON_FALLBACK_VOLUME
+
+    bridge_cfg = config["bridge"]
+    mqtt_cfg = config["mqtt"]
+    polling_cfg = config["polling"]
+    command_cfg = config["commands"]
+    ha_cfg = config["home_assistant"]
+
+    LOG_LEVEL = os.getenv("LOG_LEVEL", bridge_cfg["log_level"]).upper()
+    logging.getLogger().setLevel(getattr(logging, LOG_LEVEL, logging.INFO))
+    MQTT_HOST = os.getenv("MQTT_HOST", mqtt_cfg["host"])
+    MQTT_PORT = int(os.getenv("MQTT_PORT", str(mqtt_cfg["port"])))
+    MQTT_USER = os.getenv("MQTT_USER", mqtt_cfg["username"])
+    MQTT_PASS = os.getenv("MQTT_PASS", mqtt_cfg["password"])
+    MQTT_BASE = os.getenv("MQTT_BASE", mqtt_cfg["base_topic"])
+    DISCOVERY_PREFIX = os.getenv("DISCOVERY_PREFIX", mqtt_cfg["discovery_prefix"])
+    POLL_INTERVAL_SEC = float(os.getenv("POLL_INTERVAL", str(polling_cfg["interval"])))
+    CONNECT_TIMEOUT = float(os.getenv("CONNECT_TIMEOUT", str(polling_cfg["connect_timeout"])))
+    PER_CMD_TIMEOUT = float(os.getenv("PER_CMD_TIMEOUT", str(polling_cfg["reply_timeout"])))
+    INTER_CMD_SLEEP = float(os.getenv("INTER_CMD_SLEEP", str(polling_cfg["inter_command_delay"])))
+    RECONNECT_BACKOFF_INITIAL = float(os.getenv("RECONNECT_BACKOFF_INITIAL", str(polling_cfg["reconnect_delay"])))
+    NETWORK_FAILURE_THRESHOLD = int(os.getenv("NETWORK_FAILURE_THRESHOLD", str(polling_cfg["failure_threshold"])))
+    POST_SEND_SETTLE = float(os.getenv("POST_SEND_SETTLE", str(command_cfg["post_send_settle"])))
+    SET_RETRIES = int(os.getenv("SET_RETRIES", str(command_cfg["retries"])))
+    RETRY_SLEEP = float(os.getenv("RETRY_SLEEP", str(command_cfg["retry_delay"])))
+    VOL_COALESCE_SEC = float(os.getenv("VOL_COALESCE_SEC", str(command_cfg["coalesce_window"])))
+    VOL_ECHO_SUPPRESS_SEC = float(os.getenv("VOL_ECHO_SUPPRESS_SEC", str(command_cfg["echo_suppress"])))
+    POWER_ON_FALLBACK_VOLUME = int(command_cfg["power_on_fallback_volume"])
+    HEALTH_CHECK_INTERVAL = float(bridge_cfg["health_check_interval"])
+    HA_DISCOVERY = ha_cfg["discovery"]
+    USE_SOURCE_NAMES = ha_cfg["use_source_names"]
+    DUMP_RAW_CHUNKS = os.getenv("DUMP_RAW_CHUNKS", "1") not in ("0", "false", "False")
+
+    AMPS = {amp["id"]: (amp["host"], amp["port"]) for amp in config["amps"]}
+    AMP_METADATA = {amp["id"]: amp for amp in config["amps"]}
+    ZONE_NAMES = {amp["id"]: amp["zones"] for amp in config["amps"]}
+    SOURCE_NAMES = {amp["id"]: amp["sources"] for amp in config["amps"]}
+
+
+def zone_numbers(amp_key: str) -> list[int]:
+    return sorted(ZONE_NAMES.get(amp_key, {}))
+
+
+def source_payload(amp_key: str, source: int) -> str:
+    return SOURCE_NAMES.get(amp_key, {}).get(source, str(source)) if USE_SOURCE_NAMES else str(source)
+
+
+def source_number(amp_key: str, payload: str) -> int:
+    if not USE_SOURCE_NAMES:
+        return int(payload)
+    wanted = payload.strip().casefold()
+    for number, name in SOURCE_NAMES.get(amp_key, {}).items():
+        if name.casefold() == wanted or str(number) == wanted:
+            return number
+    raise ValueError(f"Unknown source {payload!r} for {amp_key}")
+
+
+def parse_set_topic(topic: str):
+    """Return (amp, zone, command) for a command below the configured base."""
+    base_parts = MQTT_BASE.split("/")
+    parts = topic.split("/")
+    if parts[:len(base_parts)] != base_parts:
+        return None
+    relative = parts[len(base_parts):]
+    if len(relative) != 5 or relative[1] != "zone" or relative[3] != "set":
+        return None
+    try:
+        return relative[0], int(relative[2]), relative[4].lower()
+    except ValueError:
+        return None
 
 EOL, ESC2 = b"\r", b"\x1b" + b"2"
 
@@ -119,12 +199,13 @@ def _encode_tone(level: int) -> str:
 def slugify(s: str) -> str: return "".join(ch.lower() if ch.isalnum() else "_" for ch in s).strip("_")
 def discovery_topic(component: str, object_id: str) -> str: return f"{DISCOVERY_PREFIX}/{component}/{object_id}/config"
 def device_block(amp_key: str, amp_ip: str) -> dict:
+    metadata = AMP_METADATA.get(amp_key, {})
     return {
         "identifiers": [f"ad8x_{amp_key}"],
         "manufacturer": "RTI",
-        "model": "AD-8x",
-        "name": f"RTI AD-8x ({amp_ip})",
-        "sw_version": "1.8.4",
+        "model": metadata.get("model", "AD-series"),
+        "name": metadata.get("name", f"RTI amplifier ({amp_ip})"),
+        "sw_version": VERSION,
     }
 def zone_object_id(amp_key: str, zone: int, suffix: str) -> str:
     name = ZONE_NAMES.get(amp_key, {}).get(zone, f"Zone {zone}")
@@ -251,7 +332,7 @@ class AmpSession(threading.Thread):
         base = self._topic("zone", z)
         self.mqttc.publish(f"{base}/power", "on" if sta_data["power"] else "off", retain=True)
         self.mqttc.publish(f"{base}/mute", "on" if sta_data["mute"] else "off", retain=True)
-        self.mqttc.publish(f"{base}/source", str(sta_data["source"]), retain=True)
+        self.mqttc.publish(f"{base}/source", source_payload(self.amp_name, sta_data["source"]), retain=True)
         self.mqttc.publish(f"{base}/bass", str(tone_data["bass"]), retain=True)
         self.mqttc.publish(f"{base}/treble", str(tone_data["treble"]), retain=True)
         buf = self._zone_states.setdefault(z, {})
@@ -417,7 +498,7 @@ class AmpSession(threading.Thread):
                 return False
             
             try:
-                for z in range(1, 9):
+                for z in zone_numbers(self.amp_name):
                     if self.stop_flag.is_set(): return False
                     self._send_ascii(f"*ZN{zz(z)}STA00"); time.sleep(INTER_CMD_SLEEP)
                     sta_line = self._read_reply(f"#{zz(z)},", PER_CMD_TIMEOUT)
@@ -457,7 +538,7 @@ class AmpSession(threading.Thread):
         # session. Close our side now, before waiting and reconnecting.
         self._cleanup_socket()
         
-        if self._consecutive_failures >= 3 and self._network_status != "down":
+        if self._consecutive_failures >= NETWORK_FAILURE_THRESHOLD and self._network_status != "down":
             log.error(f"[{self.amp_name}] Exceeded poll failure threshold. Publishing 'down' message.")
             down_topic = f"{MQTT_BASE}/network_status/{self.amp_name}"
             self.mqttc.publish(down_topic, "down", retain=True)
@@ -492,7 +573,7 @@ class Bridge:
     def publish_discovery(self):
         for amp_key, (amp_ip, amp_port) in AMPS.items():
             avail_t = self._topic(amp_key, "status"); dev = device_block(amp_key, amp_ip)
-            for z in range(1, 9):
+            for z in zone_numbers(amp_key):
                 zname = ZONE_NAMES.get(amp_key, {}).get(z, f"Zone {z}")
                 base = self._topic(amp_key, "zone", z); cmd_base = f"{base}/set"
                 
@@ -505,7 +586,10 @@ class Bridge:
                 vol_cfg = {"name": f"{zname} Volume", "uniq_id": zone_object_id(amp_key, z, "volume"), "stat_t": f"{base}/volume", "cmd_t": f"{cmd_base}/volume", "min": 0, "max": 75, "mode": "slider", "avty_t": avail_t, "device": dev, "val_tpl": "{{ 75 - (value | int) }}", "cmd_tpl": "{{ 75 - (value | int) }}", "optimistic": True}
                 self.client.publish(discovery_topic("number", zone_object_id(amp_key, z, "volume")), json.dumps(vol_cfg), retain=True)
 
-                source_cfg = {"name": f"{zname} Source", "uniq_id": zone_object_id(amp_key, z, "source"), "stat_t": f"{base}/source", "cmd_t": f"{cmd_base}/source", "options": [str(i) for i in range(1, 9)], "avty_t": avail_t, "device": dev}
+                source_options = ([SOURCE_NAMES[amp_key][number] for number in sorted(SOURCE_NAMES[amp_key])]
+                                  if USE_SOURCE_NAMES else
+                                  [str(number) for number in sorted(SOURCE_NAMES[amp_key])])
+                source_cfg = {"name": f"{zname} Source", "uniq_id": zone_object_id(amp_key, z, "source"), "stat_t": f"{base}/source", "cmd_t": f"{cmd_base}/source", "options": source_options, "avty_t": avail_t, "device": dev}
                 self.client.publish(discovery_topic("select", zone_object_id(amp_key, z, "source")), json.dumps(source_cfg), retain=True)
                 
                 bass_cfg = {"name": f"{zname} Bass", "uniq_id": zone_object_id(amp_key, z, "bass"), "stat_t": f"{base}/bass", "cmd_t": f"{cmd_base}/bass", "min": -12, "max": 12, "step": 2, "mode": "slider", "avty_t": avail_t, "device": dev, "icon": "mdi:speaker", "optimistic": True}
@@ -549,7 +633,7 @@ class Bridge:
         )
         
         # 4. Entity Count (using Zones)
-        entity_count = len(self.sessions) * 8 # 8 zones per amp
+        entity_count = sum(len(zone_numbers(amp_key)) for amp_key in self.sessions)
         self.client.publish(
             self._topic("diagnostics", "entity_count"),
             str(entity_count),
@@ -575,7 +659,7 @@ class Bridge:
         # --- INSTRUMENTATION ---
 
         for name, addr in AMPS.items():
-            start_delay = AMP2_START_STAGGER_SEC if name == "amp2" else 0.0
+            start_delay = AMP_METADATA[name]["startup_delay"]
             s = AmpSession(name, addr, self.client, start_delay=start_delay)
             self.sessions[name] = s; s.start()
             log.info(f"Started AmpSession {name} -> {addr[0]}:{addr[1]}")
@@ -588,7 +672,9 @@ class Bridge:
             client.subscribe(f"{self._topic('+','raw')}")
             client.subscribe(f"{self._topic('all','command')}")
             client.subscribe("homeassistant/status")
-            client.publish(self._topic("bridge","status"), "online", retain=True); self.publish_discovery()
+            client.publish(self._topic("bridge","status"), "online", retain=True)
+            if HA_DISCOVERY:
+                self.publish_discovery()
             log.info(f"MQTT connected to {MQTT_HOST}:{MQTT_PORT}")
         else: log.error(f"MQTT connect failed code: {rc}")
 
@@ -605,13 +691,16 @@ class Bridge:
 
                     # Now, publish optimistic states for HA's UI
                     for amp_key, s in self.sessions.items():
-                        for z in range(1, 9):
+                        for z in zone_numbers(amp_key):
                             base_t = s._topic("zone", z)
                             client.publish(f"{base_t}/power", "off", retain=True)
                             client.publish(f"{base_t}/mute", "off", retain=True)
                     log.info("Sent ALL OFF command and optimistically set all zones to OFF")
                 return
-            if topic == "homeassistant/status" and payload == "online": self.publish_discovery(); return
+            if topic == "homeassistant/status" and payload == "online":
+                if HA_DISCOVERY:
+                    self.publish_discovery()
+                return
             if parts[-1] == "raw":
                 sess = self.sessions.get(parts[-2])
                 if sess:
@@ -621,10 +710,14 @@ class Bridge:
                         line = sess._readline(PER_CMD_TIMEOUT)
                         client.publish(self._topic(parts[-2], "ack", "raw"), line or "", retain=False)
                 return
-            if len(parts) < 7 or parts[3] != "zone" or parts[5] != "set": return
-            amp, zone, cmd = parts[2], int(parts[4]), parts[6].lower()
+            parsed_command = parse_set_topic(topic)
+            if not parsed_command: return
+            amp, zone, cmd = parsed_command
             sess = self.sessions.get(amp)
             if not sess: return
+            if zone not in zone_numbers(amp):
+                log.warning(f"Ignoring command for unconfigured zone {amp}/{zone}")
+                return
             ok = False
 
             # --- SPEC-SAFE POWER-ON FIX ---
@@ -637,7 +730,7 @@ class Bridge:
                     # bypassing the amp's "default 45" behavior.
                     
                     # Get last volume from cache, default to a 'safe' 65
-                    last_vol = sess._zone_states.get(zone, {}).get("vol_0_75", 65)
+                    last_vol = sess._zone_states.get(zone, {}).get("vol_0_75", POWER_ON_FALLBACK_VOLUME)
                     log.info(f"[{amp}] Power ON for zone {zone} received. Setting volume to {last_vol} to power on.")
                     ok = sess.set_volume(zone, last_vol)
                 else:
@@ -647,7 +740,7 @@ class Bridge:
             
             elif cmd == "mute": ok = sess.set_mute(zone, payload.lower() in ("1", "on", "true"))
             elif cmd == "toggle_mute": ok = sess.toggle_mute(zone)
-            elif cmd == "source": ok = sess.set_source(zone, int(payload))
+            elif cmd == "source": ok = sess.set_source(zone, source_number(amp, payload))
             elif cmd == "volume": ok = sess.set_volume(zone, int(payload))
             elif cmd == "bass": ok = sess.set_bass(zone, int(payload))
             elif cmd == "treble": ok = sess.set_treble(zone, int(payload))
@@ -660,7 +753,48 @@ class Bridge:
             client.publish(self._topic(amp, "zone", "ack", cmd), "ok" if ok else "err", retain=False)
         except Exception: traceback.print_exc()
 
+def _default_config_path() -> str:
+    candidates = [
+        os.getenv("RTI_CONFIG"),
+        "/etc/rti-ad8x-bridge/config.yaml",
+        str(Path(__file__).resolve().parent.parent / "config.yaml"),
+    ]
+    for candidate in candidates:
+        if candidate and Path(candidate).expanduser().is_file():
+            return candidate
+    return candidates[1]
+
+
+def _parse_args():
+    parser = argparse.ArgumentParser(description="RTI AD-series MQTT bridge")
+    parser.add_argument("--config", default=_default_config_path(), help="YAML configuration path")
+    parser.add_argument("--check-config", action="store_true", help="validate configuration and exit")
+    parser.add_argument("--print-effective-config", action="store_true",
+                        help="print validated configuration with environment expansion and exit")
+    parser.add_argument("--version", action="version", version=VERSION)
+    return parser.parse_args()
+
+
 def main():
+    args = _parse_args()
+    try:
+        config = load_config(args.config)
+    except ConfigError as exc:
+        log.error(f"Configuration error: {exc}")
+        return 2
+    configure_runtime(config)
+    if args.check_config:
+        print(f"Configuration OK: {args.config}")
+        return 0
+    if args.print_effective_config:
+        redacted = json.loads(json.dumps(config))
+        if redacted["mqtt"]["password"]:
+            redacted["mqtt"]["password"] = "***"
+        print(json.dumps(redacted, indent=2))
+        return 0
+
+    print("RTI Bridge starting up…")
+    log.info(f"Starting RTI bridge {VERSION} with config {args.config}")
     bridge = Bridge()
     def _graceful(sig, frame): log.info(f"Signal {sig} received; stopping…"); bridge.stop(); sys.exit(0)
     signal.signal(signal.SIGINT, _graceful); signal.signal(signal.SIGTERM, _graceful)
@@ -676,7 +810,8 @@ def main():
             time.sleep(1.0) # Check every second
         # --- INSTRUMENTATION ---
     finally: bridge.stop()
+    return 0
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())
     

@@ -1,0 +1,47 @@
+schema_version: 1
+
+bridge:
+  log_level: INFO
+  health_check_interval: 30
+
+mqtt:
+  # core-mosquitto is the usual host for the official Mosquitto Broker app.
+  host: core-mosquitto
+  port: 1883
+  username: rti_bridge
+  password: change-me
+  base_topic: rti/ad8x
+  discovery_prefix: homeassistant
+
+polling:
+  interval: 60
+  connect_timeout: 2
+  reply_timeout: 3
+  inter_command_delay: 0.20
+  reconnect_delay: 5
+  failure_threshold: 3
+
+commands:
+  post_send_settle: 0.05
+  retries: 2
+  retry_delay: 0.2
+  coalesce_window: 1.2
+  echo_suppress: 1.0
+  power_on_fallback_volume: 65
+
+home_assistant:
+  discovery: true
+  use_source_names: false
+
+amps:
+  - id: amp1
+    name: RTI Amplifier 1
+    model: AD-8x
+    host: 192.168.1.82
+    port: 23
+    startup_delay: 0
+    zones:
+      1: Zone 1
+      2: Zone 2
+      3: Zone 3
+      4: Zone 4

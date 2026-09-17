@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.9.0-beta.1 — 2026-09-17
+
+- Move amplifier addresses, ports, zone definitions, source labels, MQTT
+  settings, and timing controls into validated YAML configuration.
+- Support dynamic one-to-eight-zone definitions and multiple amplifiers without
+  editing Python source.
+- Add a guided Debian/Ubuntu installer that uses an existing MQTT broker or can
+  install an authenticated Mosquitto broker.
+- Add Docker Compose sidecar and experimental Home Assistant app/add-on
+  deployment paths.
+- Preserve v1.8 MQTT topics and discovery IDs when existing amplifier IDs and
+  zone names are retained; numeric source options remain the default.
+- Preserve the v1.8.4 RTI protocol, command pacing, polling, and reconnect logic.
+- Defer tone-default restoration and `media_player` entities so they can be
+  evaluated independently from the deployment refactor.
+
 ## 1.8.4 — 2026-09-16
 
 - Change the default HA-only operating profile to `POLL_INTERVAL=60`,
