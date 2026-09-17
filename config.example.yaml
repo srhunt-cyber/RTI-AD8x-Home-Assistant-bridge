@@ -55,9 +55,9 @@ amps:
       1: Kitchen
       2: Great Room
       3: Upper Deck
-      4: Primary Bedroom
-      5: Primary Bathroom
-      6: Guest Room
+      4: Master Bed
+      5: Master Bath
+      6: Mom's Room
       7: Office
       8: Craft Room
 
@@ -70,7 +70,7 @@ amps:
     zones:
       1: Laundry
       2: Lower Bar
-      3: Recreation Room
+      3: Golf Room
       4: Lower Guest
       5: Fitness
       6: Walkout
