@@ -1,8 +1,8 @@
 FROM ghcr.io/home-assistant/base:latest
 
-ARG BUILD_VERSION=1.9.0-beta.1
+ARG BUILD_VERSION=1.9.0-beta.2
 ARG BUILD_ARCH
-ARG RTI_REF=beta-v1.9.0-beta.1
+ARG RTI_REF=beta-v1.9.0-beta.2
 
 LABEL io.hass.version="${BUILD_VERSION}" \
       io.hass.type="app" \

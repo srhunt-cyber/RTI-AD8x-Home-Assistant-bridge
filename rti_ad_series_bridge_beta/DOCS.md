@@ -26,3 +26,7 @@ preserve MQTT topics and Home Assistant entity IDs. Leave
 `use_source_names: false` to preserve numeric source selections.
 
 Do not run the stable bridge and this beta at the same time.
+
+Amplifier-default restoration is disabled and dry-run-only in the generated
+configuration. Follow the staged procedure in `docs/BETA_1.9.md`; do not enable
+automatic restoration until `CHECK` and one `ZONE` test have succeeded.

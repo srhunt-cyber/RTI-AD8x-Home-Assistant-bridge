@@ -1,7 +1,11 @@
 #!/usr/bin/env python3
 """
 RTI AD-series <-> MQTT bridge
-Version 1.9.0-beta.1 (2026-09-17)
+Version 1.9.0-beta.2 (2026-09-17)
+
+- BETA (v1.9.0-beta.2): Add opt-in, guarded amplifier-default
+  restoration with YAML targets, per-zone overrides, dry-run/manual testing,
+  amp-wide reset detection, confirmation polls, pacing, and verification.
 
 - STABILITY (v1.8.4): Use the field-tested HA-only polling profile by
   default: 60-second reconciliation polls, 200ms command spacing, and a
@@ -44,7 +48,7 @@ import psutil # REQUIRED FOR METRICS
 # ─────────────────────────────────────────────────────────────────────────────
 # LOGGING
 # ─────────────────────────────────────────────────────────────────────────────
-VERSION = "1.9.0-beta.1"
+VERSION = "1.9.0-beta.2"
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
 logging.basicConfig(
     level=getattr(logging, LOG_LEVEL, logging.INFO),
@@ -60,8 +64,9 @@ AMPS = {}
 AMP_METADATA = {}
 ZONE_NAMES = {}
 SOURCE_NAMES = {}
+RESTORATION_CONFIG = {}
 
-MQTT_HOST = os.getenv("MQTT_HOST", "rtipoll.local")
+MQTT_HOST = os.getenv("MQTT_HOST", "localhost")
 MQTT_PORT = int(os.getenv("MQTT_PORT", "1883"))
 MQTT_USER = os.getenv("MQTT_USER", "")
 MQTT_PASS = os.getenv("MQTT_PASS", "")
@@ -99,6 +104,7 @@ def configure_runtime(config: dict):
     global RECONNECT_BACKOFF_INITIAL, NETWORK_FAILURE_THRESHOLD
     global VOL_COALESCE_SEC, VOL_ECHO_SUPPRESS_SEC, HEALTH_CHECK_INTERVAL
     global HA_DISCOVERY, USE_SOURCE_NAMES, POWER_ON_FALLBACK_VOLUME
+    global RESTORATION_CONFIG
 
     bridge_cfg = config["bridge"]
     mqtt_cfg = config["mqtt"]
@@ -135,6 +141,7 @@ def configure_runtime(config: dict):
     AMP_METADATA = {amp["id"]: amp for amp in config["amps"]}
     ZONE_NAMES = {amp["id"]: amp["zones"] for amp in config["amps"]}
     SOURCE_NAMES = {amp["id"]: amp["sources"] for amp in config["amps"]}
+    RESTORATION_CONFIG = config["restoration"]
 
 
 def zone_numbers(amp_key: str) -> list[int]:
@@ -153,6 +160,37 @@ def source_number(amp_key: str, payload: str) -> int:
         if name.casefold() == wanted or str(number) == wanted:
             return number
     raise ValueError(f"Unknown source {payload!r} for {amp_key}")
+
+
+def display_volume(protocol_attenuation: int) -> int:
+    """Convert the RTI attenuation value to the existing HA 0-75 scale."""
+    return 75 - int(protocol_attenuation)
+
+
+def protocol_volume(display_level: int) -> int:
+    """Convert the existing HA 0-75 scale to RTI attenuation."""
+    return 75 - int(display_level)
+
+
+def restore_settings(amp_key: str, zone: int) -> dict:
+    """Return global restore defaults merged with an optional zone override."""
+    settings = dict(RESTORATION_CONFIG.get("defaults", {}))
+    settings.update(AMP_METADATA.get(amp_key, {}).get("zone_defaults", {}).get(zone, {}))
+    return settings
+
+
+def factory_signature_matches(amp_key: str, zone: int, state: dict) -> bool:
+    """Return whether one fully-polled zone has the configured reset signature."""
+    signature = RESTORATION_CONFIG.get("factory_signature", {})
+    if state.get("bass") != signature.get("bass", 0):
+        return False
+    if state.get("treble") != signature.get("treble", 0):
+        return False
+    if "volume" in signature:
+        raw_volume = state.get("vol_0_75")
+        if raw_volume is None or display_volume(raw_volume) != signature["volume"]:
+            return False
+    return bool(restore_settings(amp_key, zone).get("enabled", True))
 
 
 def parse_set_topic(topic: str):
@@ -228,6 +266,9 @@ class AmpSession(threading.Thread):
         self._zone_states: dict[int, dict] = {}
         self._consecutive_failures = 0
         self._network_status = None
+        self._restore_candidate_polls = 0
+        self._restore_latched = False
+        self._restore_guard = threading.Lock()
         self.start_delay = max(0.0, float(start_delay))
 
     def _cleanup_socket(self):
@@ -353,6 +394,246 @@ class AmpSession(threading.Thread):
 
     def _is_zone_on(self, zone: int) -> bool:
         return self._zone_states.get(zone, {}).get("power", False)
+
+    def _publish_restore_status(self, state: str, **details):
+        payload = {
+            "amp": self.amp_name,
+            "state": state,
+            "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            **details,
+        }
+        self.mqttc.publish(
+            self._topic("restore", "status"),
+            json.dumps(payload, separators=(",", ":")),
+            retain=True,
+        )
+
+    def _restore_zone_numbers(self) -> list[int]:
+        return [
+            zone for zone in zone_numbers(self.amp_name)
+            if restore_settings(self.amp_name, zone).get("enabled", True)
+        ]
+
+    def _factory_match_summary(self) -> tuple[list[int], int]:
+        eligible = self._restore_zone_numbers()
+        matching = [
+            zone for zone in eligible
+            if factory_signature_matches(
+                self.amp_name, zone, self._zone_states.get(zone, {})
+            )
+        ]
+        configured_minimum = RESTORATION_CONFIG.get("factory_signature", {}).get(
+            "minimum_matching_zones", 0
+        )
+        required = configured_minimum or len(eligible)
+        return matching, required
+
+    def check_restore_candidate(self) -> dict:
+        matching, required = self._factory_match_summary()
+        result = {
+            "matching_zones": matching,
+            "matching_count": len(matching),
+            "required_count": required,
+            "candidate": bool(required and len(matching) >= required),
+        }
+        self._publish_restore_status("check", **result)
+        return result
+
+    def _evaluate_automatic_restore(self):
+        if not RESTORATION_CONFIG.get("enabled") or not RESTORATION_CONFIG.get("automatic"):
+            return
+        matching, required = self._factory_match_summary()
+        is_candidate = bool(required and len(matching) >= required)
+        if not is_candidate:
+            self._restore_candidate_polls = 0
+            self._restore_latched = False
+            return
+        if self._restore_latched:
+            return
+
+        self._restore_candidate_polls += 1
+        needed = RESTORATION_CONFIG.get("confirmation_polls", 2)
+        self._publish_restore_status(
+            "candidate",
+            matching_zones=matching,
+            matching_count=len(matching),
+            required_count=required,
+            confirmation_poll=self._restore_candidate_polls,
+            confirmation_polls_required=needed,
+        )
+        log.warning(
+            "[%s] Factory-default candidate: %s/%s zones match (%s/%s confirmation polls)",
+            self.amp_name, len(matching), required, self._restore_candidate_polls, needed,
+        )
+        if self._restore_candidate_polls < needed:
+            return
+
+        if RESTORATION_CONFIG.get("dry_run", True):
+            self._restore_latched = True
+            log.warning(
+                "[%s] Restoration dry run: reset signature confirmed; no commands sent",
+                self.amp_name,
+            )
+            self._publish_restore_status(
+                "dry_run",
+                scope="all",
+                matching_zones=matching,
+                message="Reset signature confirmed; no commands sent",
+            )
+            return
+        self._restore_latched = self.restore_zones(
+            self._restore_zone_numbers(), reason="automatic"
+        )
+
+    def _query_zone_locked(self, zone: int) -> Optional[dict]:
+        if not self.connected and not self._connect():
+            return None
+        try:
+            self._send_ascii(f"*ZN{zz(zone)}STA00")
+            time.sleep(POST_SEND_SETTLE)
+            sta_line = self._read_reply(f"#{zz(zone)},", PER_CMD_TIMEOUT)
+            self._send_ascii(f"*ZN{zz(zone)}SET00")
+            time.sleep(POST_SEND_SETTLE)
+            tone_line = self._read_reply(f"${zz(zone)},", PER_CMD_TIMEOUT)
+            sta_data, tone_data = parse_sta(sta_line), parse_tone(tone_line)
+            if not (sta_data and tone_data):
+                return None
+            self._pub_zone_full(zone, sta_data, tone_data)
+            return {**sta_data, **tone_data}
+        except Exception as exc:
+            log.warning("[%s] Restore verification query failed for zone %s: %s",
+                        self.amp_name, zone, exc)
+            self._close()
+            return None
+
+    def _restore_command_locked(self, zone: int, command: str, predicate, label: str) -> bool:
+        attempts = RESTORATION_CONFIG.get("verification_attempts", 4)
+        delay = RESTORATION_CONFIG.get("command_delay", 5)
+        for attempt in range(1, attempts + 1):
+            if self.stop_flag.is_set():
+                return False
+            try:
+                if not self.connected and not self._connect():
+                    raise RuntimeError("connect failed")
+                self._send_ascii(command)
+            except Exception as exc:
+                log.warning("[%s] Restore %s send failed for zone %s (%s/%s): %s",
+                            self.amp_name, label, zone, attempt, attempts, exc)
+                self._close()
+            if self.stop_flag.wait(delay):
+                return False
+            state = self._query_zone_locked(zone)
+            if state and predicate(state):
+                return True
+            log.warning("[%s] Restore %s not confirmed for zone %s (%s/%s)",
+                        self.amp_name, label, zone, attempt, attempts)
+        return False
+
+    def _restore_zone_locked(self, zone: int) -> bool:
+        settings = restore_settings(self.amp_name, zone)
+        if not settings.get("enabled", True):
+            return True
+        display_level = settings["volume"]
+        raw_volume = protocol_volume(display_level)
+        steps = [
+            (
+                f"*ZN{zz(zone)}SRC{zz(settings['safe_source'])}",
+                lambda state: state.get("source") == settings["safe_source"],
+                f"safe source {settings['safe_source']}",
+            ),
+            (
+                f"*ZN{zz(zone)}VOL{zz(raw_volume)}",
+                lambda state: state.get("power") and state.get("vol_0_75") == raw_volume,
+                f"volume {display_level}",
+            ),
+            (
+                f"*ZN{zz(zone)}BAS{_encode_tone(settings['bass'])}",
+                lambda state: state.get("bass") == settings["bass"],
+                f"bass {settings['bass']}",
+            ),
+            (
+                f"*ZN{zz(zone)}TRB{_encode_tone(settings['treble'])}",
+                lambda state: state.get("treble") == settings["treble"],
+                f"treble {settings['treble']}",
+            ),
+            (
+                f"*ZN{zz(zone)}SRC{zz(settings['ready_source'])}",
+                lambda state: state.get("source") == settings["ready_source"],
+                f"ready source {settings['ready_source']}",
+            ),
+        ]
+        success = True
+        for command, predicate, label in steps:
+            if not self._restore_command_locked(zone, command, predicate, label):
+                success = False
+                break
+
+        # Make a best-effort power-off even when an earlier calibration step
+        # fails, so an unattended restore does not leave a room playing.
+        if settings.get("leave_powered_off", True):
+            powered_off = self._restore_command_locked(
+                zone,
+                f"*ZN{zz(zone)}PWR00",
+                lambda state: not state.get("power"),
+                "power off",
+            )
+            success = success and powered_off
+        return success
+
+    def restore_zones(self, zones: list[int], *, reason: str) -> bool:
+        if not RESTORATION_CONFIG.get("enabled"):
+            self._publish_restore_status("disabled", reason=reason)
+            return False
+        zones = [zone for zone in zones if zone in self._restore_zone_numbers()]
+        if not zones:
+            self._publish_restore_status("error", reason=reason, message="No eligible zones")
+            return False
+        if RESTORATION_CONFIG.get("dry_run", True):
+            self._publish_restore_status("dry_run", reason=reason, zones=zones)
+            log.warning("[%s] Restoration dry run for zones %s; no commands sent",
+                        self.amp_name, zones)
+            return True
+        if not self._restore_guard.acquire(blocking=False):
+            self._publish_restore_status("busy", reason=reason, zones=zones)
+            return False
+        try:
+            self._publish_restore_status("running", reason=reason, zones=zones)
+            failures = []
+            with self.lock:
+                for zone in zones:
+                    self._publish_restore_status(
+                        "running", reason=reason, zones=zones, current_zone=zone
+                    )
+                    if not self._restore_zone_locked(zone):
+                        failures.append(zone)
+            if failures:
+                self._publish_restore_status(
+                    "failed", reason=reason, zones=zones, failed_zones=failures
+                )
+                return False
+            self._publish_restore_status("complete", reason=reason, zones=zones)
+            return True
+        finally:
+            self._restore_guard.release()
+
+    def request_restore(self, payload: str):
+        command = payload.strip().upper()
+        if command == "CHECK":
+            self.check_restore_candidate()
+            return
+        if command == "ALL":
+            self.restore_zones(self._restore_zone_numbers(), reason="manual")
+            return
+        if command.startswith("ZONE "):
+            try:
+                zone = int(command.split(None, 1)[1])
+            except (ValueError, IndexError):
+                zone = -1
+            self.restore_zones([zone], reason="manual")
+            return
+        self._publish_restore_status(
+            "error", message="Use CHECK, ALL, or ZONE <number>"
+        )
 
     def set_power(self, zone: int, on: bool) -> bool: return self._send_and_confirm(zone, f"*ZN{zz(zone)}PWR{'01' if on else '00'}")
     def set_mute(self, zone: int, on: bool) -> bool: return self._send_and_confirm(zone, f"*ZN{zz(zone)}MUT{'01' if on else '00'}")
@@ -551,6 +832,7 @@ class AmpSession(threading.Thread):
         while not self.stop_flag.is_set():
             if self._poll_once():
                 backoff = RECONNECT_BACKOFF_INITIAL
+                self._evaluate_automatic_restore()
                 self.stop_flag.wait(POLL_INTERVAL_SEC)
             else:
                 self.stop_flag.wait(backoff); backoff = min(30.0, backoff * 2)
@@ -670,6 +952,7 @@ class Bridge:
         if rc == 0:
             client.subscribe(f"{self._topic('+','zone','+','set','+')}")
             client.subscribe(f"{self._topic('+','raw')}")
+            client.subscribe(f"{self._topic('+','restore','command')}")
             client.subscribe(f"{self._topic('all','command')}")
             client.subscribe("homeassistant/status")
             client.publish(self._topic("bridge","status"), "online", retain=True)
@@ -700,6 +983,18 @@ class Bridge:
             if topic == "homeassistant/status" and payload == "online":
                 if HA_DISCOVERY:
                     self.publish_discovery()
+                return
+            base_parts = MQTT_BASE.split("/")
+            relative = parts[len(base_parts):] if parts[:len(base_parts)] == base_parts else []
+            if len(relative) == 3 and relative[1:] == ["restore", "command"]:
+                sess = self.sessions.get(relative[0])
+                if sess:
+                    threading.Thread(
+                        target=sess.request_restore,
+                        args=(payload,),
+                        daemon=True,
+                        name=f"restore-{relative[0]}",
+                    ).start()
                 return
             if parts[-1] == "raw":
                 sess = self.sessions.get(parts[-2])

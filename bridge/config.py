@@ -81,6 +81,76 @@ def _normalize_numbered_names(value: Any, field: str, maximum: int = 8) -> dict[
     return dict(sorted(result.items()))
 
 
+def _tone_level(value: Any, field: str) -> int:
+    level = _as_int(value, field, -12, 12)
+    if level % 2:
+        raise ConfigError(f"{field} must be an even value")
+    return level
+
+
+def _normalize_restore_values(value: Any, field: str, *, partial: bool) -> dict[str, Any]:
+    if value is None:
+        value = {}
+    if not isinstance(value, dict):
+        raise ConfigError(f"{field} must be a mapping")
+
+    defaults: dict[str, Any] = {} if partial else {
+        "enabled": True,
+        "volume": 20,
+        "bass": 8,
+        "treble": 12,
+        "safe_source": 8,
+        "ready_source": 1,
+        "leave_powered_off": True,
+    }
+    validators = {
+        "enabled": lambda raw: _as_bool(raw, f"{field}.enabled"),
+        # Volume is expressed as the Home Assistant/display level. The RTI
+        # protocol uses attenuation, so the bridge converts it before sending.
+        "volume": lambda raw: _as_int(raw, f"{field}.volume", 0, 75),
+        "bass": lambda raw: _tone_level(raw, f"{field}.bass"),
+        "treble": lambda raw: _tone_level(raw, f"{field}.treble"),
+        "safe_source": lambda raw: _as_int(raw, f"{field}.safe_source", 1, 8),
+        "ready_source": lambda raw: _as_int(raw, f"{field}.ready_source", 1, 8),
+        "leave_powered_off": lambda raw: _as_bool(raw, f"{field}.leave_powered_off"),
+    }
+    unknown = set(value) - set(validators)
+    if unknown:
+        raise ConfigError(f"{field} contains unknown option(s): {', '.join(sorted(unknown))}")
+    for key, raw in value.items():
+        defaults[key] = validators[key](raw)
+    return defaults
+
+
+def _normalize_zones(value: Any, field: str) -> tuple[dict[int, str], dict[int, dict[str, Any]]]:
+    if isinstance(value, list):
+        value = {index: item for index, item in enumerate(value, start=1)}
+    if not isinstance(value, dict):
+        raise ConfigError(f"{field} must be a mapping or list")
+
+    names: dict[int, str] = {}
+    restore_overrides: dict[int, dict[str, Any]] = {}
+    for raw_number, raw_item in value.items():
+        number = _as_int(raw_number, f"{field} number", 1, 8)
+        if isinstance(raw_item, dict):
+            name = raw_item.get("name")
+            unknown = set(raw_item) - {"name", "defaults"}
+            if unknown:
+                raise ConfigError(
+                    f"{field}.{number} contains unknown option(s): {', '.join(sorted(unknown))}"
+                )
+            if "defaults" in raw_item:
+                restore_overrides[number] = _normalize_restore_values(
+                    raw_item["defaults"], f"{field}.{number}.defaults", partial=True
+                )
+        else:
+            name = raw_item
+        if not isinstance(name, str) or not name.strip():
+            raise ConfigError(f"{field}.{number}.name must be a non-empty string")
+        names[number] = name.strip()
+    return dict(sorted(names.items())), dict(sorted(restore_overrides.items()))
+
+
 def normalize_config(raw: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(raw, dict):
         raise ConfigError("Configuration root must be a YAML mapping")
@@ -90,8 +160,10 @@ def normalize_config(raw: dict[str, Any]) -> dict[str, Any]:
     commands = raw.get("commands") or {}
     bridge = raw.get("bridge") or {}
     home_assistant = raw.get("home_assistant") or {}
+    restoration = raw.get("restoration") or {}
     for name, section in (("mqtt", mqtt), ("polling", polling), ("commands", commands),
-                          ("bridge", bridge), ("home_assistant", home_assistant)):
+                          ("bridge", bridge), ("home_assistant", home_assistant),
+                          ("restoration", restoration)):
         if not isinstance(section, dict):
             raise ConfigError(f"{name} must be a mapping")
 
@@ -116,7 +188,7 @@ def normalize_config(raw: dict[str, Any]) -> dict[str, Any]:
         host = str(amp.get("host", "")).strip()
         if not host:
             raise ConfigError(f"amps[{index}].host cannot be empty")
-        zones = _normalize_numbered_names(amp.get("zones"), f"amps[{index}].zones")
+        zones, zone_defaults = _normalize_zones(amp.get("zones"), f"amps[{index}].zones")
         if not zones:
             raise ConfigError(f"amps[{index}].zones must contain at least one zone")
         configured_sources = _normalize_numbered_names(amp.get("sources"),
@@ -132,6 +204,7 @@ def normalize_config(raw: dict[str, Any]) -> dict[str, Any]:
             "startup_delay": _as_float(amp.get("startup_delay", (index - 1) * 5),
                                        f"amps[{index}].startup_delay", 0),
             "zones": zones,
+            "zone_defaults": zone_defaults,
             "sources": sources,
         })
 
@@ -141,6 +214,56 @@ def normalize_config(raw: dict[str, Any]) -> dict[str, Any]:
         raise ConfigError("mqtt.base_topic cannot be empty")
     if not discovery_prefix:
         raise ConfigError("mqtt.discovery_prefix cannot be empty")
+
+    restore_defaults = _normalize_restore_values(
+        restoration.get("defaults"), "restoration.defaults", partial=False
+    )
+    factory_signature = restoration.get("factory_signature") or {}
+    if not isinstance(factory_signature, dict):
+        raise ConfigError("restoration.factory_signature must be a mapping")
+    unknown_signature = set(factory_signature) - {
+        "volume", "bass", "treble", "minimum_matching_zones"
+    }
+    if unknown_signature:
+        raise ConfigError(
+            "restoration.factory_signature contains unknown option(s): "
+            + ", ".join(sorted(unknown_signature))
+        )
+    normalized_signature: dict[str, Any] = {
+        "bass": _tone_level(factory_signature.get("bass", 0),
+                            "restoration.factory_signature.bass"),
+        "treble": _tone_level(factory_signature.get("treble", 0),
+                              "restoration.factory_signature.treble"),
+        # Zero means every configured/enabled zone must match.
+        "minimum_matching_zones": _as_int(
+            factory_signature.get("minimum_matching_zones", 0),
+            "restoration.factory_signature.minimum_matching_zones", 0, 8
+        ),
+    }
+    if "volume" in factory_signature and factory_signature["volume"] is not None:
+        normalized_signature["volume"] = _as_int(
+            factory_signature["volume"], "restoration.factory_signature.volume", 0, 75
+        )
+    restoration_enabled = _as_bool(
+        restoration.get("enabled", False), "restoration.enabled"
+    )
+    restoration_automatic = _as_bool(
+        restoration.get("automatic", False), "restoration.automatic"
+    )
+    if restoration_automatic and not restoration_enabled:
+        raise ConfigError("restoration.automatic requires restoration.enabled")
+    minimum_matching = normalized_signature["minimum_matching_zones"]
+    if minimum_matching:
+        for amp in normalized_amps:
+            eligible = sum(
+                1 for zone in amp["zones"]
+                if {**restore_defaults, **amp["zone_defaults"].get(zone, {})}.get("enabled", True)
+            )
+            if minimum_matching > eligible:
+                raise ConfigError(
+                    "restoration.factory_signature.minimum_matching_zones "
+                    f"exceeds the {eligible} enabled restore zones on {amp['id']}"
+                )
 
     return {
         "schema_version": schema_version,
@@ -185,6 +308,19 @@ def normalize_config(raw: dict[str, Any]) -> dict[str, Any]:
                                   "home_assistant.discovery"),
             "use_source_names": _as_bool(home_assistant.get("use_source_names", False),
                                           "home_assistant.use_source_names"),
+        },
+        "restoration": {
+            "enabled": restoration_enabled,
+            "automatic": restoration_automatic,
+            "dry_run": _as_bool(restoration.get("dry_run", True), "restoration.dry_run"),
+            "confirmation_polls": _as_int(restoration.get("confirmation_polls", 2),
+                                           "restoration.confirmation_polls", 1, 10),
+            "command_delay": _as_float(restoration.get("command_delay", 5),
+                                       "restoration.command_delay", 0),
+            "verification_attempts": _as_int(restoration.get("verification_attempts", 4),
+                                              "restoration.verification_attempts", 1, 10),
+            "defaults": restore_defaults,
+            "factory_signature": normalized_signature,
         },
         "amps": normalized_amps,
     }

@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.9.0-beta.2 — 2026-09-17
+
+- Add optional bass, treble, volume, safe-source, ready-source, and final-power
+  defaults to YAML, with per-zone overrides.
+- Detect an amplifier reset only when the configured factory signature matches
+  every restore-enabled zone by default; require two complete successful polls
+  before automatic action.
+- Add a safe dry-run mode and MQTT `CHECK`, `ZONE <number>`, and `ALL` test
+  commands with retained JSON progress/status.
+- Pace every restoration step, verify the resulting amplifier state, retry
+  bounded failures, and make a best-effort final power-off on failure.
+- Keep restoration disabled and in dry-run mode in public example
+  configurations. Existing v1.8-compatible entities and polling behavior are
+  unchanged unless restoration is explicitly enabled.
+- Continue to defer native Home Assistant `media_player` entities to a separate
+  beta so entity-model changes remain isolated from restoration testing.
+
 ## 1.9.0-beta.1 — 2026-09-17
 
 - Move amplifier addresses, ports, zone definitions, source labels, MQTT
@@ -13,8 +30,8 @@
 - Preserve v1.8 MQTT topics and discovery IDs when existing amplifier IDs and
   zone names are retained; numeric source options remain the default.
 - Preserve the v1.8.4 RTI protocol, command pacing, polling, and reconnect logic.
-- Defer tone-default restoration and `media_player` entities so they can be
-  evaluated independently from the deployment refactor.
+- Defer tone-default restoration and `media_player` entities to later betas so
+  they can be evaluated independently from the deployment refactor.
 
 ## 1.8.4 — 2026-09-16
 

@@ -16,7 +16,7 @@ def minimal_config():
         "mqtt": {"host": "mqtt.local"},
         "amps": [{
             "id": "amp1",
-            "host": "192.168.1.82",
+            "host": "192.0.2.82",
             "zones": {1: "Kitchen", 2: "Patio", 3: "Office", 4: "Pool"},
         }],
     }
@@ -28,10 +28,52 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(config["polling"]["interval"], 60)
         self.assertEqual(config["amps"][0]["zones"][4], "Pool")
         self.assertEqual(config["amps"][0]["sources"][8], "8")
+        self.assertFalse(config["restoration"]["enabled"])
+        self.assertTrue(config["restoration"]["dry_run"])
+        self.assertEqual(config["restoration"]["defaults"]["bass"], 8)
+        self.assertEqual(config["restoration"]["defaults"]["treble"], 12)
+
+    def test_restore_defaults_and_zone_override(self):
+        raw = minimal_config()
+        raw["restoration"] = {
+            "enabled": True,
+            "automatic": True,
+            "defaults": {"volume": 20, "bass": 8, "treble": 12},
+        }
+        raw["amps"][0]["zones"][2] = {
+            "name": "Patio",
+            "defaults": {"bass": 10, "leave_powered_off": False},
+        }
+        config = normalize_config(raw)
+        self.assertEqual(config["amps"][0]["zones"][2], "Patio")
+        self.assertEqual(config["amps"][0]["zone_defaults"][2]["bass"], 10)
+        self.assertFalse(
+            config["amps"][0]["zone_defaults"][2]["leave_powered_off"]
+        )
+
+    def test_odd_tone_default_is_rejected(self):
+        raw = minimal_config()
+        raw["restoration"] = {"defaults": {"bass": 7}}
+        with self.assertRaisesRegex(ConfigError, "even value"):
+            normalize_config(raw)
+
+    def test_automatic_restore_requires_enabled(self):
+        raw = minimal_config()
+        raw["restoration"] = {"automatic": True}
+        with self.assertRaisesRegex(ConfigError, "requires"):
+            normalize_config(raw)
+
+    def test_matching_zone_requirement_is_validated_per_amp(self):
+        raw = minimal_config()
+        raw["restoration"] = {
+            "factory_signature": {"minimum_matching_zones": 5},
+        }
+        with self.assertRaisesRegex(ConfigError, "exceeds"):
+            normalize_config(raw)
 
     def test_duplicate_amp_id_is_rejected(self):
         raw = minimal_config()
-        raw["amps"].append({"id": "amp1", "host": "192.168.1.61", "zones": {1: "One"}})
+        raw["amps"].append({"id": "amp1", "host": "192.0.2.61", "zones": {1: "One"}})
         with self.assertRaisesRegex(ConfigError, "Duplicate"):
             normalize_config(raw)
 
@@ -56,7 +98,7 @@ mqtt:
   password: ${TEST_RTI_PASSWORD}
 amps:
   - id: amp1
-    host: 192.168.1.82
+    host: 192.0.2.82
     zones:
       1: Kitchen
 """

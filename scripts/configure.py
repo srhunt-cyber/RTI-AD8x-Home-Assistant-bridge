@@ -120,6 +120,29 @@ def build_config(args: argparse.Namespace) -> dict:
             "discovery": True,
             "use_source_names": False,
         },
+        # Deliberately safe on first install. Edit these values and use the
+        # documented CHECK/ZONE procedure before enabling automatic restores.
+        "restoration": {
+            "enabled": False,
+            "automatic": False,
+            "dry_run": True,
+            "confirmation_polls": 2,
+            "command_delay": 5,
+            "verification_attempts": 4,
+            "factory_signature": {
+                "bass": 0,
+                "treble": 0,
+                "minimum_matching_zones": 0,
+            },
+            "defaults": {
+                "volume": 20,
+                "bass": 8,
+                "treble": 12,
+                "safe_source": 8,
+                "ready_source": 1,
+                "leave_powered_off": True,
+            },
+        },
         "amps": amps,
     }
 

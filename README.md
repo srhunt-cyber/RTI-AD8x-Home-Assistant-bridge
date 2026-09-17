@@ -2,8 +2,9 @@
 
 > [!NOTE]
 > An optional **v1.9 beta** adds YAML configuration, a guided Linux installer,
-> Docker Compose, and an experimental Home Assistant app/add-on. Stable v1.8.4
-> remains unchanged. See [the beta deployment guide](docs/BETA_1.9.md).
+> Docker Compose, an experimental Home Assistant app/add-on, and guarded
+> amplifier-default restoration. Stable v1.8.4 remains unchanged. See
+> [the beta deployment guide](docs/BETA_1.9.md).
 
 ## ✅ Project Overview
 
@@ -57,6 +58,7 @@ interval based on how quickly those external changes must appear in HA.
 * **Optimistic UI:** Dashboards update instantly; commands don't wait for amp confirmation.
 * **Global "All Off" Command:** Listens on `rti/ad8x/all/command` for an `OFF` payload to turn all configured zones off.
 * **Robust Connection:** Uses conservative HA-only polling defaults, closes failed sockets, allows the AD-8x time to release its single-client port, and publishes retained `up`/`down` state after successful or failed polling cycles.
+* **Guarded Default Restoration (Beta):** Optional YAML targets for volume, bass, treble, and sources with dry-run/manual testing, amp-wide reset detection, pacing, read-back verification, and per-zone overrides.
 
 ---
 

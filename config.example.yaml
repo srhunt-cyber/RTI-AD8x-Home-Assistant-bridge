@@ -6,7 +6,7 @@ bridge:
   health_check_interval: 30
 
 mqtt:
-  host: 192.168.1.10
+  host: 192.0.2.10
   port: 1883
   username: ""
   # A literal password works, or use ${RTI_MQTT_PASSWORD} and set that variable.
@@ -35,11 +35,37 @@ home_assistant:
   # Leave false to preserve the numeric source options used by v1.8.x.
   use_source_names: false
 
+# Optional amplifier-default restoration. Keep dry_run true until CHECK and a
+# single ZONE test have been reviewed. Volume uses the existing HA/display
+# scale (20 sends RTI attenuation 55); tone values must be even numbers.
+restoration:
+  enabled: false
+  automatic: false
+  dry_run: true
+  confirmation_polls: 2
+  command_delay: 5
+  verification_attempts: 4
+  factory_signature:
+    bass: 0
+    treble: 0
+    # Omit volume unless its factory value has been verified on your hardware.
+    # volume: 45
+    # Zero means every restore-enabled zone on the amplifier must match.
+    minimum_matching_zones: 0
+  defaults:
+    volume: 20
+    bass: 8
+    treble: 12
+    # This input must be unused or silent during unattended calibration.
+    safe_source: 8
+    ready_source: 1
+    leave_powered_off: true
+
 amps:
   - id: amp1
     name: Main Floor Amplifier
     model: AD-8x
-    host: 192.168.1.82
+    host: 192.0.2.82
     port: 23
     startup_delay: 0
     sources:
@@ -60,11 +86,17 @@ amps:
       6: Mom's Room
       7: Office
       8: Craft Room
+      # Object form permits a room-specific override without renumbering it:
+      # 8:
+      #   name: Craft Room
+      #   defaults:
+      #     bass: 10
+      #     treble: 12
 
   - id: amp2
     name: Lower Floor Amplifier
     model: AD-8x
-    host: 192.168.1.61
+    host: 192.0.2.61
     port: 23
     startup_delay: 5
     zones:

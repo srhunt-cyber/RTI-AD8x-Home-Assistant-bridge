@@ -33,11 +33,31 @@ home_assistant:
   discovery: true
   use_source_names: false
 
+restoration:
+  enabled: false
+  automatic: false
+  dry_run: true
+  confirmation_polls: 2
+  command_delay: 5
+  verification_attempts: 4
+  factory_signature:
+    bass: 0
+    treble: 0
+    minimum_matching_zones: 0
+  defaults:
+    volume: 20
+    bass: 8
+    treble: 12
+    # This input must be unused or silent during unattended calibration.
+    safe_source: 8
+    ready_source: 1
+    leave_powered_off: true
+
 amps:
   - id: amp1
     name: RTI Amplifier 1
     model: AD-8x
-    host: 192.168.1.82
+    host: 192.0.2.82
     port: 23
     startup_delay: 0
     zones:
