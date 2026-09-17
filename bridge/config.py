@@ -151,6 +151,58 @@ def _normalize_zones(value: Any, field: str) -> tuple[dict[int, str], dict[int, 
     return dict(sorted(names.items())), dict(sorted(restore_overrides.items()))
 
 
+def _normalize_media_player_config(
+    value: Any, amps: list[dict[str, Any]]
+) -> dict[str, Any]:
+    field = "home_assistant.media_players"
+    if value is None:
+        value = {}
+    if not isinstance(value, dict):
+        raise ConfigError(f"{field} must be a mapping")
+    allowed = {"include", "name_suffix", "volume_min", "volume_max", "volume_step"}
+    unknown = set(value) - allowed
+    if unknown:
+        raise ConfigError(f"{field} contains unknown option(s): {', '.join(sorted(unknown))}")
+
+    volume_min = _as_int(value.get("volume_min", 5), f"{field}.volume_min", 0, 74)
+    volume_max = _as_int(value.get("volume_max", 40), f"{field}.volume_max", 1, 75)
+    if volume_min >= volume_max:
+        raise ConfigError(f"{field}.volume_min must be less than volume_max")
+
+    include = value.get("include", "all")
+    available = {
+        f"{amp['id']}:{zone}"
+        for amp in amps
+        for zone in amp["zones"]
+    }
+    if isinstance(include, str):
+        if include.strip().lower() != "all":
+            raise ConfigError(f"{field}.include must be 'all' or a list of amp:zone values")
+        normalized_include: str | list[str] = "all"
+    elif isinstance(include, list):
+        normalized_include = []
+        for item in include:
+            ref = str(item).strip().lower()
+            if ref not in available:
+                raise ConfigError(f"{field}.include contains unknown zone {ref!r}")
+            if ref not in normalized_include:
+                normalized_include.append(ref)
+    else:
+        raise ConfigError(f"{field}.include must be 'all' or a list of amp:zone values")
+
+    suffix = str(value.get("name_suffix", "Speakers")).strip()
+    if not suffix:
+        raise ConfigError(f"{field}.name_suffix cannot be empty")
+    return {
+        "include": normalized_include,
+        "name_suffix": suffix,
+        "volume_min": volume_min,
+        "volume_max": volume_max,
+        "volume_step": _as_int(value.get("volume_step", 1),
+                               f"{field}.volume_step", 1, 10),
+    }
+
+
 def normalize_config(raw: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(raw, dict):
         raise ConfigError("Configuration root must be a YAML mapping")
@@ -265,6 +317,15 @@ def normalize_config(raw: dict[str, Any]) -> dict[str, Any]:
                     f"exceeds the {eligible} enabled restore zones on {amp['id']}"
                 )
 
+    entity_mode = str(home_assistant.get("entity_mode", "legacy")).strip().lower()
+    if entity_mode not in {"legacy", "dual", "media_player"}:
+        raise ConfigError(
+            "home_assistant.entity_mode must be legacy, dual, or media_player"
+        )
+    media_players = _normalize_media_player_config(
+        home_assistant.get("media_players"), normalized_amps
+    )
+
     return {
         "schema_version": schema_version,
         "bridge": {
@@ -308,6 +369,8 @@ def normalize_config(raw: dict[str, Any]) -> dict[str, Any]:
                                   "home_assistant.discovery"),
             "use_source_names": _as_bool(home_assistant.get("use_source_names", False),
                                           "home_assistant.use_source_names"),
+            "entity_mode": entity_mode,
+            "media_players": media_players,
         },
         "restoration": {
             "enabled": restoration_enabled,

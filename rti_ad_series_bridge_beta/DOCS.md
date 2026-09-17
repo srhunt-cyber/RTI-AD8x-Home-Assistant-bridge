@@ -30,3 +30,10 @@ Do not run the stable bridge and this beta at the same time.
 Amplifier-default restoration is disabled and dry-run-only in the generated
 configuration. Follow the staged procedure in `docs/BETA_1.9.md`; do not enable
 automatic restoration until `CHECK` and one `ZONE` test have succeeded.
+
+Beta.3 can also generate MQTT-backed Home Assistant `media_player` entities.
+The app itself cannot silently edit Home Assistant's main configuration. Use
+the repository's `scripts/generate_ha_media_players.py` from another checkout,
+copy the resulting YAML into `/config/packages`, and follow the one-zone test
+in `docs/BETA_1.9.md`. Keep `entity_mode: legacy` until that package is ready;
+use `dual` while preserving existing dashboards.

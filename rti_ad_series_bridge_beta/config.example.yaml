@@ -32,6 +32,13 @@ commands:
 home_assistant:
   discovery: true
   use_source_names: false
+  entity_mode: legacy
+  media_players:
+    include: all
+    name_suffix: Speakers
+    volume_min: 5
+    volume_max: 40
+    volume_step: 1
 
 restoration:
   enabled: false

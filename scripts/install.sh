@@ -56,6 +56,7 @@ install -m 0644 "$SOURCE_DIR/bridge/rti_ad8x_bridge.py" "$INSTALL_DIR/bridge/"
 install -m 0644 "$SOURCE_DIR/bridge/config.py" "$INSTALL_DIR/bridge/"
 install -m 0644 "$SOURCE_DIR/bridge/requirements.txt" "$INSTALL_DIR/bridge/"
 install -m 0755 "$SOURCE_DIR/scripts/configure.py" "$INSTALL_DIR/scripts/"
+install -m 0755 "$SOURCE_DIR/scripts/generate_ha_media_players.py" "$INSTALL_DIR/scripts/"
 
 python3 -m venv "$INSTALL_DIR/.venv"
 "$INSTALL_DIR/.venv/bin/pip" install --disable-pip-version-check -r "$INSTALL_DIR/bridge/requirements.txt"

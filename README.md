@@ -54,7 +54,8 @@ interval based on how quickly those external changes must appear in HA.
 * **Home Assistant Auto-Discovery:** Bridge publishes RTI entities so HA picks them up automatically.
 * **Service Health Monitoring:** Publishes bridge health stats (CPU, memory, uptime, amp connection status) to MQTT for monitoring.
 * **Dynamic Sonos Favorites:** (Requires Pyscript) Auto-scans Sonos favorites and populates a dropdown in HA.
-* **Complete Alexa Voice Control:** (Requires Nabu Casa) On/off and safe, clamped volume via virtual template lights.
+* **Alexa Speaker Control (Beta):** Optional generated `media_player` entities
+  provide native on/off, mute, source, and safely clamped speaker-volume intents.
 * **Optimistic UI:** Dashboards update instantly; commands don't wait for amp confirmation.
 * **Global "All Off" Command:** Listens on `rti/ad8x/all/command` for an `OFF` payload to turn all configured zones off.
 * **Robust Connection:** Uses conservative HA-only polling defaults, closes failed sockets, allows the AD-8x time to release its single-client port, and publishes retained `up`/`down` state after successful or failed polling cycles.
@@ -186,6 +187,16 @@ This allows you to select a Sonos favorite from a dropdown and have it play on a
     * **Automation 2 (Play Favorite):** An automation triggered by the `input_select` changing, which calls `media_player.select_source` on the target Sonos Port.
 
 ### 3. Alexa Voice Control (via Nabu Casa)
+
+The v1.9.0-beta.3 path uses generated `media_player` entities, allowing Alexa
+to treat each RTI zone as a speaker instead of showing its volume as light
+brightness. It is additive in `dual` mode, so existing dashboards continue to
+use their current switch, number, and select entities. Follow the staged
+one-zone procedure in [the beta guide](docs/BETA_1.9.md).
+
+The template-light configuration below is retained only for stable v1.8.x
+installations. Do not expose both the old light and the new media player for the
+same zone to Alexa under the same name.
 
 This creates virtual "light" entities for Alexa. It allows you to say, "Alexa, set Kitchen Speakers to 50 percent," and have it safely map that to a pre-defined volume range on the amp.
 

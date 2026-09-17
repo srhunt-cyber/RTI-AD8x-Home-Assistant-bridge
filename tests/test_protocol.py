@@ -36,6 +36,33 @@ class ProtocolTests(unittest.TestCase):
         finally:
             bridge.MQTT_BASE = original
 
+    def test_media_player_mode_can_clear_legacy_discovery(self):
+        class FakeClient:
+            def __init__(self):
+                self.messages = []
+
+            def publish(self, topic, payload, retain=False):
+                self.messages.append((topic, payload, retain))
+
+        original_amps = bridge.AMPS
+        original_zones = bridge.ZONE_NAMES
+        original_metadata = bridge.AMP_METADATA
+        try:
+            bridge.AMPS = {"amp1": ("192.0.2.82", 23)}
+            bridge.ZONE_NAMES = {"amp1": {1: "Kitchen"}}
+            bridge.AMP_METADATA = {"amp1": {"zones": {1: "Kitchen"}}}
+            instance = bridge.Bridge()
+            fake = FakeClient()
+            instance.client = fake
+            instance.clear_legacy_discovery()
+            self.assertEqual(len(fake.messages), 6)
+            self.assertTrue(all(payload == "" for _, payload, _ in fake.messages))
+            self.assertTrue(all(retain for _, _, retain in fake.messages))
+        finally:
+            bridge.AMPS = original_amps
+            bridge.ZONE_NAMES = original_zones
+            bridge.AMP_METADATA = original_metadata
+
 
 if __name__ == "__main__":
     unittest.main()

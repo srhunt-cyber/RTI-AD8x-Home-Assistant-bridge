@@ -1,6 +1,6 @@
 FROM python:3.12-slim
 
-ARG VERSION=1.9.0-beta.2
+ARG VERSION=1.9.0-beta.3
 LABEL org.opencontainers.image.title="RTI AD-series MQTT Bridge" \
       org.opencontainers.image.version="${VERSION}" \
       org.opencontainers.image.source="https://github.com/srhunt-cyber/RTI-AD8x-Home-Assistant-bridge"

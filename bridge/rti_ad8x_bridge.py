@@ -1,7 +1,11 @@
 #!/usr/bin/env python3
 """
 RTI AD-series <-> MQTT bridge
-Version 1.9.0-beta.2 (2026-09-17)
+Version 1.9.0-beta.3 (2026-09-17)
+
+- BETA (v1.9.0-beta.3): Add optional generated Home Assistant speaker
+  entities for native media cards and Alexa volume intents. Legacy discovery
+  remains the default; dual mode preserves every existing dashboard entity.
 
 - BETA (v1.9.0-beta.2): Add opt-in, guarded amplifier-default
   restoration with YAML targets, per-zone overrides, dry-run/manual testing,
@@ -48,7 +52,7 @@ import psutil # REQUIRED FOR METRICS
 # ─────────────────────────────────────────────────────────────────────────────
 # LOGGING
 # ─────────────────────────────────────────────────────────────────────────────
-VERSION = "1.9.0-beta.2"
+VERSION = "1.9.0-beta.3"
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
 logging.basicConfig(
     level=getattr(logging, LOG_LEVEL, logging.INFO),
@@ -91,6 +95,7 @@ VOL_ECHO_SUPPRESS_SEC   = float(os.getenv("VOL_ECHO_SUPPRESS_SEC", "1.00"))
 HEALTH_CHECK_INTERVAL = 30.0 # Interval for sending metrics and heartbeat
 HA_DISCOVERY = True
 USE_SOURCE_NAMES = False
+ENTITY_MODE = "legacy"
 POWER_ON_FALLBACK_VOLUME = 65
 # --- INSTRUMENTATION ---
 
@@ -103,7 +108,7 @@ def configure_runtime(config: dict):
     global INTER_CMD_SLEEP, SET_RETRIES, RETRY_SLEEP, DUMP_RAW_CHUNKS
     global RECONNECT_BACKOFF_INITIAL, NETWORK_FAILURE_THRESHOLD
     global VOL_COALESCE_SEC, VOL_ECHO_SUPPRESS_SEC, HEALTH_CHECK_INTERVAL
-    global HA_DISCOVERY, USE_SOURCE_NAMES, POWER_ON_FALLBACK_VOLUME
+    global HA_DISCOVERY, USE_SOURCE_NAMES, ENTITY_MODE, POWER_ON_FALLBACK_VOLUME
     global RESTORATION_CONFIG
 
     bridge_cfg = config["bridge"]
@@ -135,6 +140,7 @@ def configure_runtime(config: dict):
     HEALTH_CHECK_INTERVAL = float(bridge_cfg["health_check_interval"])
     HA_DISCOVERY = ha_cfg["discovery"]
     USE_SOURCE_NAMES = ha_cfg["use_source_names"]
+    ENTITY_MODE = ha_cfg["entity_mode"]
     DUMP_RAW_CHUNKS = os.getenv("DUMP_RAW_CHUNKS", "1") not in ("0", "false", "False")
 
     AMPS = {amp["id"]: (amp["host"], amp["port"]) for amp in config["amps"]}
@@ -880,6 +886,24 @@ class Bridge:
                 treble_cfg = {"name": f"{zname} Treble", "uniq_id": zone_object_id(amp_key, z, "treble"), "stat_t": f"{base}/treble", "cmd_t": f"{cmd_base}/treble", "min": -12, "max": 12, "step": 2, "mode": "slider", "avty_t": avail_t, "device": dev, "icon": "mdi:surround-sound", "optimistic": True}
                 self.client.publish(discovery_topic("number", zone_object_id(amp_key, z, "treble")), json.dumps(treble_cfg), retain=True)
 
+    def clear_legacy_discovery(self):
+        """Remove retained legacy discovery configs in media-player-only mode."""
+        for amp_key in AMPS:
+            for z in zone_numbers(amp_key):
+                for component, suffix in (
+                    ("switch", "power"),
+                    ("switch", "mute"),
+                    ("number", "volume"),
+                    ("select", "source"),
+                    ("number", "bass"),
+                    ("number", "treble"),
+                ):
+                    self.client.publish(
+                        discovery_topic(component, zone_object_id(amp_key, z, suffix)),
+                        "",
+                        retain=True,
+                    )
+
     # --- INSTRUMENTATION ---
     def publish_diagnostics(self):
         """Gather and publish system and connection diagnostics metrics."""
@@ -956,7 +980,9 @@ class Bridge:
             client.subscribe(f"{self._topic('all','command')}")
             client.subscribe("homeassistant/status")
             client.publish(self._topic("bridge","status"), "online", retain=True)
-            if HA_DISCOVERY:
+            if ENTITY_MODE == "media_player":
+                self.clear_legacy_discovery()
+            elif HA_DISCOVERY:
                 self.publish_discovery()
             log.info(f"MQTT connected to {MQTT_HOST}:{MQTT_PORT}")
         else: log.error(f"MQTT connect failed code: {rc}")
@@ -981,7 +1007,9 @@ class Bridge:
                     log.info("Sent ALL OFF command and optimistically set all zones to OFF")
                 return
             if topic == "homeassistant/status" and payload == "online":
-                if HA_DISCOVERY:
+                if ENTITY_MODE == "media_player":
+                    self.clear_legacy_discovery()
+                elif HA_DISCOVERY:
                     self.publish_discovery()
                 return
             base_parts = MQTT_BASE.split("/")

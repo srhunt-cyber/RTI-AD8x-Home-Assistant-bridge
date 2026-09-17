@@ -119,6 +119,14 @@ def build_config(args: argparse.Namespace) -> dict:
         "home_assistant": {
             "discovery": True,
             "use_source_names": False,
+            "entity_mode": "legacy",
+            "media_players": {
+                "include": "all",
+                "name_suffix": "Speakers",
+                "volume_min": 5,
+                "volume_max": 40,
+                "volume_step": 1,
+            },
         },
         # Deliberately safe on first install. Edit these values and use the
         # documented CHECK/ZONE procedure before enabling automatic restores.

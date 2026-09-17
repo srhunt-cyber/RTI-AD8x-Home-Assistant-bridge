@@ -34,6 +34,17 @@ home_assistant:
   discovery: true
   # Leave false to preserve the numeric source options used by v1.8.x.
   use_source_names: false
+  # legacy: existing switch/number/select entities only (default)
+  # dual: keep legacy entities and add the generated media_player package
+  # media_player: generated media players only; install the package first
+  entity_mode: legacy
+  media_players:
+    include: all
+    name_suffix: Speakers
+    # Alexa/media-card 0..100% maps safely into this existing RTI display range.
+    volume_min: 5
+    volume_max: 40
+    volume_step: 1
 
 # Optional amplifier-default restoration. Keep dry_run true until CHECK and a
 # single ZONE test have been reviewed. Volume uses the existing HA/display

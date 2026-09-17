@@ -32,6 +32,9 @@ class ConfigTests(unittest.TestCase):
         self.assertTrue(config["restoration"]["dry_run"])
         self.assertEqual(config["restoration"]["defaults"]["bass"], 8)
         self.assertEqual(config["restoration"]["defaults"]["treble"], 12)
+        self.assertEqual(config["home_assistant"]["entity_mode"], "legacy")
+        self.assertEqual(config["home_assistant"]["media_players"]["volume_min"], 5)
+        self.assertEqual(config["home_assistant"]["media_players"]["volume_max"], 40)
 
     def test_restore_defaults_and_zone_override(self):
         raw = minimal_config()
@@ -89,6 +92,39 @@ class ConfigTests(unittest.TestCase):
         config = normalize_config(raw)
         self.assertFalse(config["home_assistant"]["discovery"])
         self.assertTrue(config["home_assistant"]["use_source_names"])
+
+    def test_dual_media_player_config(self):
+        raw = minimal_config()
+        raw["home_assistant"] = {
+            "entity_mode": "dual",
+            "media_players": {
+                "include": ["amp1:1", "amp1:4"],
+                "volume_min": 5,
+                "volume_max": 40,
+                "volume_step": 2,
+            },
+        }
+        config = normalize_config(raw)
+        media = config["home_assistant"]["media_players"]
+        self.assertEqual(config["home_assistant"]["entity_mode"], "dual")
+        self.assertEqual(media["include"], ["amp1:1", "amp1:4"])
+        self.assertEqual(media["volume_step"], 2)
+
+    def test_invalid_media_player_zone_is_rejected(self):
+        raw = minimal_config()
+        raw["home_assistant"] = {
+            "media_players": {"include": ["amp2:1"]},
+        }
+        with self.assertRaisesRegex(ConfigError, "unknown zone"):
+            normalize_config(raw)
+
+    def test_invalid_media_player_volume_range_is_rejected(self):
+        raw = minimal_config()
+        raw["home_assistant"] = {
+            "media_players": {"volume_min": 40, "volume_max": 40},
+        }
+        with self.assertRaisesRegex(ConfigError, "less than"):
+            normalize_config(raw)
 
     def test_environment_expansion(self):
         content = """

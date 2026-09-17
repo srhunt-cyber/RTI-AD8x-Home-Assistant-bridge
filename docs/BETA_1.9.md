@@ -1,6 +1,6 @@
 # 1.9 beta: YAML configuration and deployment
 
-Version `1.9.0-beta.2` is an optional test release. The stable `main` branch
+Version `1.9.0-beta.3` is an optional test release. The stable `main` branch
 remains on v1.8.4.
 
 The beta deliberately preserves the field-tested RTI command, pacing, polling,
@@ -14,11 +14,12 @@ and reconnect behavior. Its changes are focused on configuration and packaging:
 - Docker Compose sidecar deployment;
 - experimental Home Assistant app/add-on deployment;
 - configuration validation before service startup;
+- optional MQTT-backed Home Assistant speaker entities for media cards and
+  Alexa's native volume vocabulary;
 - opt-in, verified restoration of volume, bass, treble, and source defaults.
 
-Native Home Assistant `media_player` entities remain deferred. They change the
-Home Assistant entity model and should be evaluated separately from deployment
-and amplifier-restoration behavior.
+The speaker layer is deliberately generated as a separate Home Assistant
+package. It does not add another Telnet client or alter RTI command pacing.
 
 ## Compatibility rules
 
@@ -36,12 +37,98 @@ entity IDs remain unchanged.
 > control interface accepts a single TCP client, and both bridges would also
 > publish conflicting retained MQTT state.
 
+## Optional Home Assistant media players
+
+`home_assistant.entity_mode` has three choices:
+
+| Mode | Existing entities | Media players | Intended use |
+|---|---:|---:|---|
+| `legacy` | Yes | No | Default and exact v1.8 compatibility |
+| `dual` | Yes | Yes | Safest migration; existing dashboards remain intact |
+| `media_player` | No | Yes | Only after dashboards and automations have migrated |
+
+The generated package talks to the existing MQTT topics. It does not connect
+to an amplifier and therefore does not compete for the AD-series single TCP
+client slot. In `media_player` mode, the bridge clears its retained legacy MQTT
+discovery configurations; install and validate the package before selecting
+that mode.
+
+The default media-player volume mapping preserves the prior template-light
+safety range:
+
+```yaml
+home_assistant:
+  discovery: true
+  use_source_names: false
+  entity_mode: dual
+  media_players:
+    include: all
+    name_suffix: Speakers
+    volume_min: 5
+    volume_max: 40
+    volume_step: 1
+```
+
+Alexa/media-card volume 0–100% maps linearly to RTI display levels 5–40. A
+request for 100% therefore cannot select the amplifier's maximum level 75.
+
+### Safe one-zone test
+
+Do this after the beta bridge itself is stable in `legacy` mode:
+
+1. Change `entity_mode` to `dual`, validate the bridge configuration, and
+   restart the bridge. All existing dashboard entities remain unchanged.
+2. Generate only one low-risk zone. For example, Amp 1 zone 1:
+
+   ```bash
+   cd /opt/rti-ad8x-bridge
+   sudo .venv/bin/python scripts/generate_ha_media_players.py \
+     --config /etc/rti-ad8x-bridge/config.yaml \
+     --output /tmp/rti_ad8x_media_players.yaml \
+     --zone amp1:1
+   ```
+
+   When running from a Git checkout rather than `/opt`, use that checkout's
+   `.venv/bin/python` and `scripts` directory.
+3. Copy the generated file to
+   `/config/packages/rti_ad8x_media_players.yaml` on Home Assistant.
+4. Ensure the existing `homeassistant:` block in `configuration.yaml` includes:
+
+   ```yaml
+   homeassistant:
+     packages: !include_dir_named packages
+   ```
+
+   Merge this under an existing `homeassistant:` key; never create a second
+   top-level key with the same name.
+5. Run **Developer Tools → YAML → Check configuration**, then restart Home
+   Assistant. Confirm the new `media_player.<zone>_speakers` controls power,
+   absolute volume, volume up/down, mute, and source.
+6. In Home Assistant Cloud's Alexa entity exposure, expose only that new media
+   player. Unexpose the old template light for the same zone before asking
+   Alexa to discover devices, otherwise Alexa may retain two identically named
+   devices.
+7. Test these phrases:
+
+   - “Alexa, turn on Kitchen Speakers.”
+   - “Alexa, set Kitchen Speakers volume to 30 percent.”
+   - “Alexa, lower Kitchen Speakers volume.”
+   - “Alexa, mute Kitchen Speakers.”
+
+8. After the one-zone test succeeds, regenerate without `--zone` to include
+   every zone selected by `media_players.include`. Replace the package, check
+   configuration, and restart Home Assistant.
+
+The generated MQTT/template helper entities are marked or named as internal
+diagnostic entities. Do not expose them to Alexa. Expose only the resulting
+`media_player` entities.
+
 ## Option A: guided Linux install
 
 Use a dedicated Debian or Ubuntu host, VM, or Raspberry Pi:
 
 ```bash
-git clone --branch beta-v1.9.0-beta.2 \
+git clone --branch beta-v1.9.0-beta.3 \
   https://github.com/srhunt-cyber/RTI-AD8x-Home-Assistant-bridge.git
 cd RTI-AD8x-Home-Assistant-bridge
 sudo ./scripts/install.sh
@@ -79,7 +166,7 @@ an MQTT broker on the LAN. Host networking is intended for Linux hosts.
 ## Option C: Home Assistant app/add-on
 
 Because this beta is intentionally isolated from `main`, install it as a local
-Home Assistant app/add-on: download the `beta-v1.9.0-beta.2` branch source
+Home Assistant app/add-on: download the `beta-v1.9.0-beta.3` branch source
 archive, copy the
 `rti_ad_series_bridge_beta` folder into Home Assistant's local apps/add-ons
 directory, reload the store, and install **RTI AD-series MQTT Bridge Beta**.

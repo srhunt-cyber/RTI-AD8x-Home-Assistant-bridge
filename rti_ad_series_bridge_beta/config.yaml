@@ -1,5 +1,5 @@
 name: RTI AD-series MQTT Bridge Beta
-version: 1.9.0-beta.2
+version: 1.9.0-beta.3
 slug: rti_ad_series_bridge_beta
 description: MQTT bridge for RTI AD-series distributed-audio amplifiers
 url: https://github.com/srhunt-cyber/RTI-AD8x-Home-Assistant-bridge

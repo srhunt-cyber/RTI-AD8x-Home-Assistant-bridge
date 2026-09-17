@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.9.0-beta.3 — 2026-09-17
+
+- Add an opt-in Home Assistant media-player package generator for native media
+  cards and Alexa speaker-volume intents.
+- Add `legacy`, `dual`, and `media_player` entity modes. `legacy` remains the
+  default; `dual` preserves all existing switch/number/select entities while
+  adding media players.
+- Generate self-contained MQTT-backed Universal Media Player entities with
+  power, mute, source, absolute volume, and relative volume controls.
+- Preserve the existing Alexa safety mapping by default: speaker 0–100% maps
+  into RTI display levels 5–40, never the amplifier's full 0–75 range.
+- Support generation for a single test zone before expanding to every zone.
+- Leave the RTI Telnet protocol, polling, reconnect, restoration, and existing
+  MQTT topic behavior unchanged.
+
 ## 1.9.0-beta.2 — 2026-09-17
 
 - Add optional bass, treble, volume, safe-source, ready-source, and final-power
