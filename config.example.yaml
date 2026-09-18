@@ -27,6 +27,8 @@ commands:
   retries: 2
   retry_delay: 0.2
   coalesce_window: 1.2
+  # Tone DSP changes need substantially longer than power/source/volume.
+  tone_settle_delay: 6.0
   echo_suppress: 1.0
   power_on_fallback_volume: 65
 
