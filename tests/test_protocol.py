@@ -85,6 +85,17 @@ class ProtocolTests(unittest.TestCase):
         self.assertTrue(any(topic.endswith("/bass") and payload == "8"
                             for topic, payload, _ in mqtt.messages))
 
+    def test_first_volume_on_off_zone_is_synchronous(self):
+        session = bridge.AmpSession("amp1", ("192.0.2.1", 23), object())
+        session._zone_states = {1: {"power": False, "vol_0_75": 66}}
+        sent = []
+        session._send_and_confirm = lambda zone, command: sent.append((zone, command)) or True
+
+        self.assertTrue(session.set_volume(1, 75))
+
+        self.assertEqual(sent, [(1, "*ZN01VOL75")])
+        self.assertNotIn("vol_timer", session._zone_states[1])
+
     def test_command_topic_respects_configured_base(self):
         original = bridge.MQTT_BASE
         bridge.MQTT_BASE = "house/audio/rti"
