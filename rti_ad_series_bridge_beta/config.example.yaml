@@ -33,7 +33,7 @@ commands:
 home_assistant:
   discovery: true
   use_source_names: false
-  entity_mode: legacy
+  entity_mode: dual
   media_players:
     include: all
     name_suffix: Speakers

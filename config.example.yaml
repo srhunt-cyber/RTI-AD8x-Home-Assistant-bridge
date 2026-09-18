@@ -36,10 +36,10 @@ home_assistant:
   discovery: true
   # Leave false to preserve the numeric source options used by v1.8.x.
   use_source_names: false
-  # legacy: existing switch/number/select entities only (default)
-  # dual: keep legacy entities and add the generated media_player package
+  # legacy: existing switch/number/select entities only
+  # dual: recommended default; keep legacy entities and add media_player support
   # media_player: generated media players only; install the package first
-  entity_mode: legacy
+  entity_mode: dual
   media_players:
     include: all
     name_suffix: Speakers

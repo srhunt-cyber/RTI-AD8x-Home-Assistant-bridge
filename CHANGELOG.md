@@ -1,5 +1,37 @@
 # Changelog
 
+## 2.0.0 — 2026-09-18
+
+- Promote the complete 1.9 beta series to the current production release after
+  live validation on two AD-8x amplifiers and 16 zones.
+- Make `dual` the default entity mode for new configurations: traditional
+  switch/number/select entities remain available while generated
+  `media_player` speakers provide the recommended Home Assistant card and
+  Amazon Alexa control path.
+- Replace the unreliable Alexa template-light volume workaround in the primary
+  documentation with generated native speaker entities and safe 5–40 volume
+  mapping.
+- Add validated YAML configuration, a guided Debian/Ubuntu/Raspberry Pi
+  installer, Docker Compose, and experimental Home Assistant app/add-on
+  packaging.
+- Support up to eight configured amplifiers with one to eight zones and sources
+  per amplifier through the guided installer.
+- Add guarded amplifier-default detection and verified restoration with dry-run,
+  manual zone/amp testing, per-zone overrides, two-poll confirmation, progress
+  reporting, and automatic mode.
+- Restore zones safely by powering on at silent volume, selecting a configured
+  silent input, applying paced tone targets, restoring volume/source, and
+  returning the zone to its configured final power state.
+- Coalesce rapid volume and tone changes. Wait six seconds for the slower tone
+  DSP and verify once without retransmitting during its settle period.
+- Serialize the first volume/power-on command so an immediately following
+  source selection cannot overtake it during polling.
+- Preserve v1.8 MQTT topics, discovery IDs, and existing dashboards when amp
+  IDs, zone names, base topic, and numeric source mode are retained.
+- Complete automated protocol/config/restoration/media-player tests and live
+  end-to-end validation of power, mute, source, volume, tone, Alexa, network
+  recovery, and full eight-zone automatic restoration.
+
 ## 1.9.0-beta.3 — 2026-09-17
 
 - Live-test update: coalesce rapid bass/treble GUI input into one absolute

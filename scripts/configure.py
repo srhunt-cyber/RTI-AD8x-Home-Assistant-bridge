@@ -113,13 +113,14 @@ def build_config(args: argparse.Namespace) -> dict:
             "retries": 2,
             "retry_delay": 0.2,
             "coalesce_window": 1.2,
+            "tone_settle_delay": 6.0,
             "echo_suppress": 1.0,
             "power_on_fallback_volume": 65,
         },
         "home_assistant": {
             "discovery": True,
             "use_source_names": False,
-            "entity_mode": "legacy",
+            "entity_mode": "dual",
             "media_players": {
                 "include": "all",
                 "name_suffix": "Speakers",

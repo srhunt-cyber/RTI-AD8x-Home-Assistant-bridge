@@ -1,296 +1,338 @@
-# RTI AD-8x MQTT Bridge & Home Assistant Integration
+# RTI AD-Series MQTT Bridge for Home Assistant
 
 > [!NOTE]
-> An optional **v1.9 beta** adds YAML configuration, a guided Linux installer,
-> Docker Compose, an experimental Home Assistant app/add-on, and guarded
-> amplifier-default restoration. Stable v1.8.4 remains unchanged. See
-> [the beta deployment guide](docs/BETA_1.9.md).
+> **Version 2.0 is the current production release.** It was validated on a
+> two-amplifier, 16-zone AD-8x installation using Home Assistant, MQTT, native
+> speaker entities, Amazon Alexa, and automatic post-reset restoration.
 
-## ✅ Project Overview
+## Project overview
 
-This project replaces legacy control apps with a modern, unified Home Assistant
-(HA) interface. It supports multiple RTI AD-series amplifiers, configurable
-zones, and MQTT Discovery for a seamless multi-room music control system.
+RTI AD-4x and AD-8x amplifiers are durable distributed-audio matrix amplifiers,
+but their original control path assumes dealer programming, legacy RTI
+processors, or older applications. This project turns that installed hardware
+into a modern Home Assistant appliance without placing the amplifier's fragile
+TCP behavior inside Home Assistant.
 
-The core of the project is a Python-based service that provides a two-way bridge between the RTI amplifiers and an MQTT broker, enabling full integration with Home Assistant via MQTT Discovery.
+The bridge runs as a dedicated MQTT service. It owns one persistent connection
+to each amplifier, serializes and paces commands, polls for reconciliation, and
+publishes retained state. Home Assistant and Alexa communicate through MQTT,
+so their restarts and UI activity do not repeatedly open amplifier sessions.
 
-This repository contains the Python bridge script. The documentation below explains how to set it up and how to integrate it with other Home Assistant components like Sonos and Alexa for a complete solution.
+Version 2.0 supports up to eight amplifiers through the guided installer, with
+one to eight configured zones and up to eight sources per amplifier: as many as
+64 independently controlled zones. A smaller AD-4x installation simply defines
+the zones it uses.
 
-### Why the bridge runs outside Home Assistant
+## Why a persistent MQTT bridge?
 
-An early version ran the Python connection directly inside Home Assistant. In practice, that was unreliable. The AD-8x Ethernet control interface behaves like a slow serial device exposed through TCP: it accepts only one client, silently drops commands sent too quickly, and may briefly refuse a reconnect after a socket closes.
+### The amplifier behaves like a serial device behind TCP
 
-The dedicated bridge gives each amplifier one long-lived connection owner and handles command pacing, polling, reconnects, and MQTT state independently of Home Assistant restarts or integration reloads. Home Assistant communicates with the bridge through MQTT rather than opening its own AD-8x connection.
+Field testing found that the AD-series Ethernet control interface:
+
+- permits only one active TCP control client per amplifier;
+- may refuse a new connection while releasing the previous session;
+- drops or delays commands that arrive faster than its internal processors can
+  handle; and
+- processes bass and treble much more slowly than power, source, mute, and
+  volume.
+
+A small installation can appear to work with occasional connect/send/disconnect
+transactions. At whole-home scale, connection churn and concurrent commands
+make that approach vulnerable to latency, refused connections, dropped work,
+and stale state.
+
+### One connection owner and a hardware-safe pipeline
+
+The standalone bridge maintains one long-lived connection per amplifier.
+Per-amplifier locks serialize polling and commands, while MQTT decouples Home
+Assistant from amplifier timing and reconnects. Rapid GUI changes are
+coalesced, commands are paced, and important changes are read back.
+
+This architecture is intentionally suitable for multi-amplifier automation:
+a scene can target many zones at once without allowing multiple Home Assistant
+tasks to compete for the same RTI socket. Home Assistant remains responsive if
+an amplifier is slow, rebooting, or temporarily unreachable.
 
 > [!IMPORTANT]
-> Each AD-8x accepts only one TCP client on port 23. Close the amplifier web client, Telnet/netcat sessions, RTI test utilities, and any other IP integration before starting this bridge. A second connection will usually receive `Connection refused` or time out.
+> Close amplifier web clients, Telnet/netcat sessions, RTI test utilities, and
+> any other IP driver before starting the bridge. A second client usually sees
+> `Connection refused` or a timeout.
 
-### HA-only operating model
+### Recommended HA-only operating model
 
-The reference installation now uses Home Assistant and this MQTT bridge as the
-only day-to-day control path. Its former RTI XP-8v connection over RS-232 and
-the legacy RTI control app have been retired. This matters because the bridge
-no longer needs to poll rapidly to discover state changes made by a parallel
-controller.
+Version 2.0 assumes Home Assistant/MQTT is the normal control path. Commands
+from Home Assistant or Alexa are sent immediately; a conservative 60-second
+background poll reconciles state and detects physical amplifier resets without
+constantly loading the RTI TCP server.
 
-For this HA-only model, the recommended systemd environment is:
+If an RS-232 processor or another controller can also change state, shorten the
+poll interval according to how quickly those external changes must appear in
+Home Assistant. Do not run a second IP integration against the same amplifier.
 
-```ini
-Environment="POLL_INTERVAL=60"
-Environment="INTER_CMD_SLEEP=0.20"
-Environment="PER_CMD_TIMEOUT=3.0"
-```
+Tone commands receive special treatment: rapid bass/treble adjustments
+coalesce to the final even target, the bridge waits six seconds for the slower
+tone DSP, and then verifies once without resending during the settle window.
 
-Commands originating in HA or Alexa still go to the amplifier immediately and
-are confirmed by a zone query. The 60-second interval applies only to background
-reconciliation, so a physical reboot or a change made outside HA can take up to
-about one minute to appear. If an installation still uses an RTI processor,
-RS-232 controller, or another application in parallel, choose a shorter poll
-interval based on how quickly those external changes must appear in HA.
+## Features
 
-## ✨ Key Features
+- **Complete zone control:** power, mute, source, volume, bass, and treble.
+- **Multi-amplifier scale:** up to eight amplifiers and 64 configured zones
+  through the installer.
+- **YAML configuration:** amplifier addresses, zone/source names, MQTT,
+  timing, entity mode, restoration targets, and per-zone overrides.
+- **Home Assistant MQTT Discovery:** traditional switch, number, and select
+  entities require no hand-written zone YAML.
+- **Native speaker layer:** generated `media_player` entities work with media
+  cards and are the recommended Alexa exposure method.
+- **Safe migration:** `dual` mode keeps existing dashboards working while
+  adding speakers; `legacy` and `media_player`-only modes are also available.
+- **Volume safety range:** speaker 0–100% maps to a configurable RTI display
+  range of 5–40 by default, preventing a voice request for 100% from selecting
+  the amplifier's full level 75.
+- **Command coalescing and pacing:** rapid volume/tone changes resolve to the
+  latest target without flooding the amplifier.
+- **Guarded default restoration:** after a verified factory-default signature,
+  the bridge can safely restore volume, bass, treble, source, and final power
+  state with paced read-back verification.
+- **Health and availability:** retained bridge/per-amplifier status plus CPU,
+  memory, uptime, connection, and zone-count diagnostics over MQTT.
+- **Global all-off:** publish `OFF` to `rti/ad8x/all/command`.
+- **Flexible deployment:** guided Debian/Ubuntu/Raspberry Pi installation,
+  Docker Compose sidecar, or an experimental Home Assistant app/add-on.
 
-* **Full RTI Zone Control:** Power, Mute, Source, Volume, Bass, & Treble for each configured zone.
-* **Home Assistant Auto-Discovery:** Bridge publishes RTI entities so HA picks them up automatically.
-* **Service Health Monitoring:** Publishes bridge health stats (CPU, memory, uptime, amp connection status) to MQTT for monitoring.
-* **Dynamic Sonos Favorites:** (Requires Pyscript) Auto-scans Sonos favorites and populates a dropdown in HA.
-* **Alexa Speaker Control (Beta):** Optional generated `media_player` entities
-  provide native on/off, mute, source, and safely clamped speaker-volume intents.
-* **Optimistic UI:** Dashboards update instantly; commands don't wait for amp confirmation.
-* **Global "All Off" Command:** Listens on `rti/ad8x/all/command` for an `OFF` payload to turn all configured zones off.
-* **Robust Connection:** Uses conservative HA-only polling defaults, closes failed sockets, allows the AD-8x time to release its single-client port, and publishes retained `up`/`down` state after successful or failed polling cycles.
-* **Guarded Default Restoration (Beta):** Optional YAML targets for volume, bass, treble, and sources with dry-run/manual testing, amp-wide reset detection, pacing, read-back verification, and per-zone overrides.
+## Installation
 
----
+For complete migration, testing, restoration, Docker, app/add-on, and rollback
+instructions, see the [deployment guide](docs/DEPLOYMENT.md).
 
-## 🚀 Part 1: Bridge Installation & Setup
+### Option A — guided Linux installation (recommended)
 
-The v1.9 beta offers three deployment choices. The complete commands,
-compatibility rules, and rollback procedure are in
-[the beta deployment guide](docs/BETA_1.9.md).
-
-### Guided Debian/Ubuntu installation
+Use a Debian/Ubuntu host, VM, or Raspberry Pi that can reach the amplifiers and
+MQTT broker:
 
 ```bash
+git clone https://github.com/srhunt-cyber/RTI-AD8x-Home-Assistant-bridge.git
+cd RTI-AD8x-Home-Assistant-bridge
 sudo ./scripts/install.sh
 ```
 
-The installer asks whether you already have an MQTT broker. It can install an
-authenticated Mosquitto broker if needed, prompts for the amplifier and zone
-layout, validates the resulting YAML, and installs the systemd service.
+The installer can use an existing MQTT broker or install an authenticated local
+Mosquitto broker. It prompts for amplifiers and zones, validates the YAML,
+installs a dedicated Python environment, and enables the systemd service.
 
-### Docker Compose sidecar
+Production paths:
+
+```text
+Service:  rti-ad8x-bridge.service
+Code:     /opt/rti-ad8x-bridge
+Config:   /etc/rti-ad8x-bridge/config.yaml
+```
+
+Useful commands:
+
+```bash
+sudo systemctl status rti-ad8x-bridge.service --no-pager -l
+sudo journalctl -fu rti-ad8x-bridge.service
+sudo /opt/rti-ad8x-bridge/.venv/bin/python \
+  /opt/rti-ad8x-bridge/bridge/rti_ad8x_bridge.py \
+  --config /etc/rti-ad8x-bridge/config.yaml \
+  --check-config
+```
+
+The installer preserves an existing production configuration during upgrades.
+
+### Option B — Docker Compose sidecar
 
 ```bash
 cp config.example.yaml config.yaml
-# Edit config.yaml.
+# Edit config.yaml before starting.
 docker compose up -d --build
+docker compose logs -f rti-bridge
 ```
 
-### Home Assistant app/add-on
+The supplied Compose file uses host networking on Linux so the container can
+reach LAN amplifiers and the MQTT broker.
 
-The experimental app package is in `rti_ad_series_bridge_beta`. It uses a YAML
-file in the app configuration directory and expects an existing MQTT broker.
-See its `DOCS.md` before starting it.
+### Option C — Home Assistant app/add-on (experimental)
 
-For every deployment, validate a configuration without connecting to an amp:
+The package in `rti_ad_series_bridge_beta` runs the same 2.0 bridge, but the
+app/add-on packaging remains experimental. It expects an existing MQTT broker
+and a YAML file in its app configuration directory. See its `DOCS.md` before
+using it.
+
+## Configuration
+
+The full annotated configuration is in [`config.example.yaml`](config.example.yaml).
+The recommended Home Assistant mode for new and upgraded installations is:
+
+```yaml
+home_assistant:
+  discovery: true
+  use_source_names: false
+  entity_mode: dual
+  media_players:
+    include: all
+    name_suffix: Speakers
+    volume_min: 5
+    volume_max: 40
+    volume_step: 1
+```
+
+Entity modes:
+
+| Mode | Traditional entities | Speaker entities | Use case |
+|---|---:|---:|---|
+| `dual` | Yes | Yes | Recommended; safest migration and default for 2.0 |
+| `legacy` | Yes | No | Exact v1.8-style entity model |
+| `media_player` | No | Yes | After all dashboards/automations are migrated |
+
+`dual` does not create a second amplifier connection. The generated speaker
+package consumes the bridge's MQTT topics.
+
+## Home Assistant speaker entities
+
+Home Assistant's Universal Media Player configuration contains the mapping
+between zone MQTT topics and native speaker behavior. Generate it from the same
+validated bridge YAML so names, sources, topics, and safety ranges cannot drift:
 
 ```bash
-python bridge/rti_ad8x_bridge.py --config config.yaml --check-config
+sudo /opt/rti-ad8x-bridge/.venv/bin/python \
+  /opt/rti-ad8x-bridge/scripts/generate_ha_media_players.py \
+  --config /etc/rti-ad8x-bridge/config.yaml \
+  --output /tmp/rti_ad8x_media_players.yaml
 ```
 
----
+Copy the resulting file to:
 
-## 📺 Part 2: Home Assistant Integration
+```text
+/config/packages/rti_ad8x_media_players.yaml
+```
 
-Once the bridge is running, all your RTI amplifier zones will be auto-discovered in Home Assistant. These next steps integrate them with the rest of your smart home.
-
-### 1. Bridge Health Monitoring (Sensors)
-
-To monitor the bridge's health, add the following sensors to your Home Assistant configuration.
-
-Add this block to your `configuration.yaml` (or a dedicated `mqtt_sensors.yaml` file):
+Ensure Home Assistant has one packages include beneath its existing
+`homeassistant:` key:
 
 ```yaml
-mqtt:
-  sensor:
-    # Uptime Sensor
-    - unique_id: rtipoll_bridge_uptime
-      name: "RTI Bridge Uptime"
-      state_topic: "rti/ad8x/diagnostics/uptime_s"
-      device_class: duration
-      unit_of_measurement: "s"
-      icon: mdi:clock-start
-      value_template: "{{ value | int }}"
-      
-    # CPU Usage Sensor
-    - unique_id: rtipoll_bridge_cpu
-      name: "RTI Bridge CPU"
-      state_topic: "rti/ad8x/diagnostics/cpu_usage_pct"
-      unit_of_measurement: "%"
-      value_template: "{{ value | float }}"
-      icon: mdi:cpu-64-bit
-      
-    # Memory Usage Sensor
-    - unique_id: rtipoll_bridge_memory
-      name: "RTI Bridge Memory"
-      state_topic: "rti/ad8x/diagnostics/memory_usage_mb"
-      unit_of_measurement: "MB"
-      value_template: "{{ value | float }}"
-      icon: mdi:memory
-
-    # Discovered Zones Count
-    - unique_id: rtipoll_entity_count
-      state_topic: "rti/ad8x/diagnostics/entity_count"
-      unit_of_measurement: "zones"
-      value_template: "{{ value | int }}"
-      icon: mdi:speaker-multiple
-      
-    # Amp Connection Status
-    - unique_id: rtipoll_controller_link
-      name: "RTI Amp Connections"
-      state_topic: "rti/ad8x/diagnostics/amp_connection_status"
-      icon: mdi:lan
-      value_template: >
-        {% set amps = value_json | default({}) %}
-        {% set online_count = (amps.values() | select('eq', 'online') | list | count) %}
-        {{ online_count }}/{{ amps | length }} online
-
-  binary_sensor:
-    # LWT Service Status
-    - unique_id: rtipoll_bridge_service_status
-      name: "RTI Bridge Service Status"
-      state_topic: "rti/ad8x/bridge/status"
-      payload_on: "online"
-      payload_off: "offline"
-      device_class: connectivity
-      icon: mdi:check-circle-outline
+homeassistant:
+  packages: !include_dir_named packages
 ```
 
-After adding the YAML, restart Home Assistant or **Reload the MQTT Integration** from the "Devices & Services" page.
+Run **Developer Tools → YAML → Check configuration**, then restart Home
+Assistant. Regenerate the package after changing amplifier IDs, zones, source
+names, the MQTT base topic, or media-player volume limits.
 
-### 2. Sonos Favorites Integration (Pyscript)
+## Alexa: expose speakers, not template lights
 
-This allows you to select a Sonos favorite from a dropdown and have it play on a Sonos Port (which is connected as an input to your RTI amp).
+The generated `media_player` entities are the supported and recommended Alexa
+path in 2.0. Alexa recognizes them as speakers and can use speaker-oriented
+power, mute, and volume intents. The older template-light workaround exposed
+volume as brightness and was unreliable for voice volume commands.
 
-1.  **Install Pyscript:** Go to HACS -> Integrations -> and install "Pyscript".
-2.  **Create a Helper:** Create an `input_select` helper (via UI or YAML) to hold the favorites list.
-    ```yaml
-    input_select:
-      sonos_favorites:
-        name: Sonos Favorites
-        options:
-          - "Select a Favorite"
-    ```
-3.  **Create Automations:**
-    * **Automation 1 (Sync Favorites):** An automation that runs `pyscript.sonos_favorites_sync` to keep the `input_select` updated.
-    * **Automation 2 (Play Favorite):** An automation triggered by the `input_select` changing, which calls `media_player.select_source` on the target Sonos Port.
+With Home Assistant Cloud/Nabu Casa:
 
-### 3. Alexa Voice Control (via Nabu Casa)
+1. Generate and validate the media-player package.
+2. Expose only the resulting `media_player.<zone>_speakers` entities to Alexa.
+3. Do not expose the package's diagnostic helper sensors.
+4. Unexpose any old template-light speaker entities with the same names.
+5. Remove stale duplicate devices in Alexa if necessary, then run discovery.
 
-The v1.9.0-beta.3 path uses generated `media_player` entities, allowing Alexa
-to treat each RTI zone as a speaker instead of showing its volume as light
-brightness. It is additive in `dual` mode, so existing dashboards continue to
-use their current switch, number, and select entities. Follow the staged
-one-zone procedure in [the beta guide](docs/BETA_1.9.md).
+Amazon/Nabu Casa synchronization can take several minutes. Existing dashboards
+may continue using their switch/number/select entities indefinitely in `dual`
+mode; Alexa and dashboards do not have to use the same entity type.
 
-The template-light configuration below is retained only for stable v1.8.x
-installations. Do not expose both the old light and the new media player for the
-same zone to Alexa under the same name.
+## Guarded amplifier-default restoration
 
-This creates virtual "light" entities for Alexa. It allows you to say, "Alexa, set Kitchen Speakers to 50 percent," and have it safely map that to a pre-defined volume range on the amp.
-
-1.  **Expose Entities:** Ensure you have Home Assistant Cloud (Nabu Casa) set up.
-2.  **Add Template Lights:** Add the following to your `configuration.yaml` (or a `templates.yaml` file).
+Restoration is disabled and dry-run-only in the public example. Configure the
+desired defaults and complete the documented `CHECK`, one-zone, and one-amp
+tests before enabling unattended restoration.
 
 ```yaml
-template:
-  light:
-    - name: "Kitchen Speakers"
-      unique_id: ad8x_amp1_kitchen_music_light
-      # Light is "on" if the amp zone is on
-      state: "{{ is_state('switch.kitchen_power', 'on') }}"
-      
-      # Map amp volume 5..40 -> HA brightness 1..254
-      level: >
-        {% set v = states('number.kitchen_volume') | float(15) %}
-        {% set v = [40, [v, 5]|max]|min %}
-        {{ (((v - 5) / 35) * 253 + 1) | round(0) }}
-        
-      # Map HA brightness 1..254 -> amp volume 5..40
-      set_level:
-        variables:
-          b: "{{ [[brightness | int, 1] | max, 254] | min }}"
-          v: "{{ ((b - 1) / 253.0) * 35 + 5 }}"
-        service: number.set_value
-        target: { entity_id: number.kitchen_volume }
-        data: { value: "{{ [40, [v, 5]|max]|min | round(0) }}" }
-        
-      # What to do on "Alexa, turn on Kitchen Speakers"
-      turn_on:
-        - service: switch.turn_on
-          target: { entity_id: switch.kitchen_power }
-        # Set a default volume when turning on
-        - service: number.set_value
-          target: { entity_id: number.kitchen_volume }
-          data: { value: 15 }
-          
-      # What to do on "Alexa, turn off Kitchen Speakers"
-      turn_off:
-        service: switch.turn_off
-        target: { entity_id: switch.kitchen_power }
-
-    # --- REPEAT FOR OTHER ZONES ---
-    # - name: "Great Room Speakers"
-    #   unique_id: ad8x_amp1_great_room_music_light
-    #   state: "{{ is_state('switch.great_room_power', 'on') }}"
-    #   ...
+restoration:
+  enabled: false
+  automatic: false
+  dry_run: true
+  confirmation_polls: 2
+  command_delay: 5
+  verification_attempts: 4
+  factory_signature:
+    bass: 0
+    treble: 0
+    minimum_matching_zones: 0  # all enabled zones must match
+  defaults:
+    volume: 20
+    bass: 8
+    treble: 12
+    safe_source: 8             # must be unused or silent
+    ready_source: 1
+    leave_powered_off: true
 ```
-*Note: You must replace `switch.kitchen_power` and `number.kitchen_volume` with the actual entity IDs created by the bridge.*
 
-3.  **Expose & Discover:** In Nabu Casa settings, expose these new `light.kitchen_speakers` entities to Alexa. Ask Alexa to "Discover devices."
+Automatic restoration requires the factory signature on two complete
+successful polls by default. It then restores each zone sequentially, verifies
+each setting, and publishes retained progress to:
 
-### 4. Dashboard UI Dependencies
+```text
+rti/ad8x/<amp-id>/restore/status
+```
 
-The dashboards shown in this project's screenshots rely on the `custom:button-card` plugin.
+This is intentionally different from treating a transient connection failure
+as proof that an amplifier reset. Network status alone never triggers default
+restoration.
 
-* **Install:** Go to HACS -> Frontend -> and install "Button Card".
-* **Add Resource:** Go to Settings → Dashboards → More Options (⋮) → Resources → Add Resource.
-    * URL: `/hacsfiles/button-card/button-card.js`
-    * Type: `JavaScript Module`
+## Operational behavior
 
----
+- A single incomplete poll can occur and recover normally. Investigate repeated
+  failures that cross the configured threshold and publish retained `down`.
+- `Connection refused` usually means another client owns the amplifier's TCP
+  slot or the amplifier has not released a previous socket yet.
+- Do not automatically power-cycle amplifiers after one failed poll.
+- MQTT retained messages are delivered immediately to new subscribers; inspect
+  timestamps embedded in JSON status payloads before treating them as new work.
+- The 60-second poll affects only background reconciliation. Home Assistant and
+  Alexa commands are sent immediately.
 
-## 🧪 Troubleshooting
+## Troubleshooting
 
-**Symptom:** The log shows `connect failed: [Errno 111] Connection refused` or repeated connection timeouts.
+### Nothing responds in Home Assistant
 
-**Cause:** The AD-8x accepts only one TCP client on port 23 and can take several seconds to release that slot after a disconnect. Its web client or another integration may also be holding the connection.
+```bash
+sudo systemctl status rti-ad8x-bridge.service --no-pager -l
+sudo journalctl -u rti-ad8x-bridge.service -n 200 --no-pager
+mosquitto_sub -v -t 'rti/ad8x/#'
+```
 
-**Fix:**
-1. Close the AD-8x web client and every manual Telnet/netcat session.
-2. Confirm no other automation or RTI IP driver is connecting to the same amplifier.
-3. Restart this bridge once. Do not repeatedly restart or automatically power-cycle the amplifier for a single failed poll.
-4. With v1.8.4, isolated `Consecutive failures: 1` messages can occur and recover normally. Investigate when failures reach 3 and a retained `down` status is published.
+Confirm the MQTT broker address/credentials and verify that only one bridge
+process is connected to each amplifier.
 
-**Symptom:** The service fails to start, and `journalctl -u rti-ad8x-mqtt-bridge.service` shows `-- No entries --`.
+### Repeated connection refusals or timeouts
 
-**Cause:** This almost always means a Python error is happening on import, before logging is set up. The most common cause is a missing dependency (like `psutil`).
+Close web/Telnet/test clients, stop competing integrations, and allow several
+seconds for the RTI control port to release. Restart the bridge once; avoid a
+rapid restart loop.
 
-**Fix:**
-1.  Stop the service: `sudo systemctl stop rti-ad8x-mqtt-bridge.service`
-2.  Go to the script directory: `cd /home/YOUR_USER/RTI-AD8x-Home-Assistant-bridge`
-3.  Activate the virtual environment: `source .venv/bin/activate`
-4.  Install dependencies: `pip install -r bridge/requirements.txt`
-5.  Test run it manually: `python bridge/rti_ad8x_bridge.py`
-6.  If it runs, `CTRL+C` and restart the service: `sudo systemctl start rti-ad8x-mqtt-bridge.service`
+### Alexa reports a speaker unavailable
 
-**Symptom:** Nothing responds in Home Assistant.
+Confirm the corresponding `media_player` works in Home Assistant, check the
+amplifier availability topic, ensure the media player—not an old light—is
+exposed, and allow the cloud device list time to synchronize.
 
-**Fix:**
-1.  Watch MQTT traffic on your broker host: `mosquitto_sub -v -t 'rti/ad8x/#'`
-2.  Check the service log: `journalctl -u rti-ad8x-mqtt-bridge.service -f`
+## Upgrading from 1.8 or the 1.9 beta
 
-**Symptom:** Alexa can’t find devices.
+To preserve existing MQTT topics and entity IDs:
 
-**Fix:** Ensure the `light.kitchen_speakers` entities are exposed via Nabu Casa and run an Alexa discovery again.
+1. Keep the same amplifier IDs (`amp1`, `amp2`, and so on).
+2. Keep existing zone names exactly.
+3. Keep `mqtt.base_topic: rti/ad8x`.
+4. Keep `home_assistant.use_source_names: false` unless you intend to migrate
+   existing source selections.
+5. Use `entity_mode: dual` while retaining existing dashboards.
+6. Never run old and new bridges simultaneously.
+
+Version 2.0 uses the same `rti-ad8x-bridge.service` and production paths as the
+1.9 guided installation. See the [deployment guide](docs/DEPLOYMENT.md) for a
+staged migration and rollback procedure.
+
+## License and scope
+
+This is an independent community project and is not affiliated with or
+supported by RTI. Keep a tested rollback path before changing a working
+installation, especially when enabling automatic restoration.

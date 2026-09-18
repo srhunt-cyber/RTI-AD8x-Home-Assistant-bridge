@@ -15,7 +15,7 @@ if ! command -v apt-get >/dev/null 2>&1; then
   exit 2
 fi
 
-echo "RTI AD-series MQTT Bridge 1.9 beta installer"
+echo "RTI AD-series MQTT Bridge 2.0 installer"
 read -r -p "Use an existing MQTT broker? [Y/n] " existing_broker
 existing_broker=${existing_broker:-Y}
 
@@ -54,6 +54,7 @@ install -d -o root -g root -m 0755 "$INSTALL_DIR/bridge" "$INSTALL_DIR/scripts"
 install -d -o root -g rti-ad8x -m 0750 "$CONFIG_DIR"
 install -m 0644 "$SOURCE_DIR/bridge/rti_ad8x_bridge.py" "$INSTALL_DIR/bridge/"
 install -m 0644 "$SOURCE_DIR/bridge/config.py" "$INSTALL_DIR/bridge/"
+install -m 0644 "$SOURCE_DIR/bridge/version.py" "$INSTALL_DIR/bridge/"
 install -m 0644 "$SOURCE_DIR/bridge/requirements.txt" "$INSTALL_DIR/bridge/"
 install -m 0755 "$SOURCE_DIR/scripts/configure.py" "$INSTALL_DIR/scripts/"
 install -m 0755 "$SOURCE_DIR/scripts/generate_ha_media_players.py" "$INSTALL_DIR/scripts/"

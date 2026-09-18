@@ -1,10 +1,12 @@
-# 1.9 beta: YAML configuration and deployment
+# Version 2.0 deployment and migration guide
 
-Version `1.9.0-beta.3` is an optional test release. The stable `main` branch
-remains on v1.8.4.
+Version 2.0 promotes the field-tested 1.9 beta architecture to the current
+production release. It preserves v1.8 MQTT compatibility while adding validated
+YAML configuration, deployment tooling, native speaker entities, and guarded
+default restoration.
 
-The beta deliberately preserves the field-tested RTI command, pacing, polling,
-and reconnect behavior. Its changes are focused on configuration and packaging:
+The release preserves the field-tested RTI command, pacing, polling, and
+reconnect behavior. Version 2.0 adds:
 
 - amplifiers, IP addresses, ports, zone counts, zone names, and optional source
   names now live in YAML;
@@ -14,8 +16,8 @@ and reconnect behavior. Its changes are focused on configuration and packaging:
 - Docker Compose sidecar deployment;
 - experimental Home Assistant app/add-on deployment;
 - configuration validation before service startup;
-- optional MQTT-backed Home Assistant speaker entities for media cards and
-  Alexa's native volume vocabulary;
+- MQTT-backed Home Assistant speaker entities for media cards and the
+  recommended Alexa speaker-control path;
 - opt-in, verified restoration of volume, bass, treble, and source defaults.
 
 Live testing confirmed that AD-series bass/treble changes are absolute but the
@@ -39,18 +41,18 @@ To preserve an existing v1.8 Home Assistant installation:
 With those settings, MQTT topics, discovery unique IDs, and existing dashboard
 entity IDs remain unchanged.
 
-> Never run stable and beta bridges simultaneously. The AD-series Ethernet
+> Never run old and new bridges simultaneously. The AD-series Ethernet
 > control interface accepts a single TCP client, and both bridges would also
 > publish conflicting retained MQTT state.
 
-## Optional Home Assistant media players
+## Home Assistant media players
 
 `home_assistant.entity_mode` has three choices:
 
 | Mode | Existing entities | Media players | Intended use |
 |---|---:|---:|---|
-| `legacy` | Yes | No | Default and exact v1.8 compatibility |
-| `dual` | Yes | Yes | Safest migration; existing dashboards remain intact |
+| `dual` | Yes | Yes | 2.0 default; safest migration and recommended mode |
+| `legacy` | Yes | No | Exact v1.8 compatibility |
 | `media_player` | No | Yes | Only after dashboards and automations have migrated |
 
 The generated package talks to the existing MQTT topics. It does not connect
@@ -80,7 +82,8 @@ request for 100% therefore cannot select the amplifier's maximum level 75.
 
 ### Safe one-zone test
 
-Do this after the beta bridge itself is stable in `legacy` mode:
+For an existing installation, this staged one-zone test remains the safest way
+to introduce the speaker layer:
 
 1. Change `entity_mode` to `dual`, validate the bridge configuration, and
    restart the bridge. All existing dashboard entities remain unchanged.
@@ -134,8 +137,7 @@ diagnostic entities. Do not expose them to Alexa. Expose only the resulting
 Use a dedicated Debian or Ubuntu host, VM, or Raspberry Pi:
 
 ```bash
-git clone --branch beta-v1.9.0-beta.3 \
-  https://github.com/srhunt-cyber/RTI-AD8x-Home-Assistant-bridge.git
+git clone https://github.com/srhunt-cyber/RTI-AD8x-Home-Assistant-bridge.git
 cd RTI-AD8x-Home-Assistant-bridge
 sudo ./scripts/install.sh
 ```
@@ -169,13 +171,13 @@ docker compose logs -f rti-bridge
 The compose file uses host networking so the container can reach amplifiers and
 an MQTT broker on the LAN. Host networking is intended for Linux hosts.
 
-## Option C: Home Assistant app/add-on
+## Option C: Home Assistant app/add-on (experimental)
 
-Because this beta is intentionally isolated from `main`, install it as a local
-Home Assistant app/add-on: download the `beta-v1.9.0-beta.3` branch source
-archive, copy the
+The core 2.0 bridge is production-tested, but this packaging path remains
+experimental. Install it as a local Home Assistant app/add-on: download the
+current release source archive, copy the
 `rti_ad_series_bridge_beta` folder into Home Assistant's local apps/add-ons
-directory, reload the store, and install **RTI AD-series MQTT Bridge Beta**.
+directory, reload the store, and install **RTI AD-series MQTT Bridge**.
 Start it once; the first start creates an app configuration file and exits.
 Edit that YAML in the app configuration directory, then start the app again.
 
@@ -216,8 +218,9 @@ restoration:
 `volume` uses the existing Home Assistant/display scale. A target of 20 is sent
 to the amplifier as attenuation 55. Bass and treble must be even values from
 -12 through 12. `safe_source` must be an unused or silent input: the bridge
-selects it before the volume command powers the zone, preventing the previous
-music source from playing during calibration.
+powers the zone on at display volume 0, selects the safe source, restores tone
+and volume, and therefore prevents the previous music source from playing
+audibly during calibration.
 
 `minimum_matching_zones: 0` means every restore-enabled zone on an amplifier
 must match the factory signature. A legitimate zero setting in one room cannot
@@ -242,7 +245,7 @@ Keep the existing Home Assistant restore automation disabled while testing so
 only one restoration owner can issue commands.
 
 1. Set `enabled: true`, retain `automatic: false` and `dry_run: true`, validate
-   the configuration, and restart the beta.
+   the configuration, and restart the bridge.
 2. Subscribe to restoration status:
 
    ```bash
@@ -278,7 +281,7 @@ restarted. It acts only after the amp-wide reset signature is confirmed.
 
 ## Rollback
 
-Stop the beta before restoring v1.8.4. On a guided Linux installation:
+Stop version 2.0 before restoring v1.8.4. On a guided Linux installation:
 
 ```bash
 sudo systemctl disable --now rti-ad8x-bridge.service

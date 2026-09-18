@@ -1,7 +1,8 @@
-# RTI AD-series MQTT Bridge Beta
+# RTI AD-series MQTT Bridge 2.0 app/add-on
 
-This experimental Home Assistant app runs the same bridge as the standalone
-Linux and Docker installations.
+This experimental Home Assistant packaging runs the same production 2.0 bridge
+as the standalone Linux and Docker installations. The bridge core is
+field-tested; the app/add-on packaging remains experimental.
 
 ## Before starting
 
@@ -25,15 +26,15 @@ Keep `amp1`, `amp2`, and the current zone names during a v1.8 migration to
 preserve MQTT topics and Home Assistant entity IDs. Leave
 `use_source_names: false` to preserve numeric source selections.
 
-Do not run the stable bridge and this beta at the same time.
+Do not run this app and another RTI bridge at the same time.
 
 Amplifier-default restoration is disabled and dry-run-only in the generated
-configuration. Follow the staged procedure in `docs/BETA_1.9.md`; do not enable
+configuration. Follow the staged procedure in `docs/DEPLOYMENT.md`; do not enable
 automatic restoration until `CHECK` and one `ZONE` test have succeeded.
 
-Beta.3 can also generate MQTT-backed Home Assistant `media_player` entities.
+Version 2.0 can also generate MQTT-backed Home Assistant `media_player` entities.
 The app itself cannot silently edit Home Assistant's main configuration. Use
 the repository's `scripts/generate_ha_media_players.py` from another checkout,
 copy the resulting YAML into `/config/packages`, and follow the one-zone test
-in `docs/BETA_1.9.md`. Keep `entity_mode: legacy` until that package is ready;
-use `dual` while preserving existing dashboards.
+in `docs/DEPLOYMENT.md`. The recommended `dual` mode preserves existing
+dashboards while adding native speaker entities for media cards and Alexa.

@@ -32,7 +32,7 @@ class ConfigTests(unittest.TestCase):
         self.assertTrue(config["restoration"]["dry_run"])
         self.assertEqual(config["restoration"]["defaults"]["bass"], 8)
         self.assertEqual(config["restoration"]["defaults"]["treble"], 12)
-        self.assertEqual(config["home_assistant"]["entity_mode"], "legacy")
+        self.assertEqual(config["home_assistant"]["entity_mode"], "dual")
         self.assertEqual(config["home_assistant"]["media_players"]["volume_min"], 5)
         self.assertEqual(config["home_assistant"]["media_players"]["volume_max"], 40)
         self.assertEqual(config["commands"]["tone_settle_delay"], 6.0)

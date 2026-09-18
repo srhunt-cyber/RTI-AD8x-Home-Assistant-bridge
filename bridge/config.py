@@ -317,7 +317,7 @@ def normalize_config(raw: dict[str, Any]) -> dict[str, Any]:
                     f"exceeds the {eligible} enabled restore zones on {amp['id']}"
                 )
 
-    entity_mode = str(home_assistant.get("entity_mode", "legacy")).strip().lower()
+    entity_mode = str(home_assistant.get("entity_mode", "dual")).strip().lower()
     if entity_mode not in {"legacy", "dual", "media_player"}:
         raise ConfigError(
             "home_assistant.entity_mode must be legacy, dual, or media_player"

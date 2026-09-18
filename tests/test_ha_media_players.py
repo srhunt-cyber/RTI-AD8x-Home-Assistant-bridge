@@ -10,6 +10,7 @@ sys.path.insert(0, str(REPO_ROOT / "scripts"))
 
 from config import ConfigError, normalize_config  # noqa: E402
 from generate_ha_media_players import build_package, render_package  # noqa: E402
+from version import VERSION  # noqa: E402
 
 
 def media_config():
@@ -67,6 +68,7 @@ class MediaPlayerPackageTests(unittest.TestCase):
         loaded = yaml.safe_load(rendered)
         self.assertIn("mqtt", loaded)
         self.assertIn("media_player", loaded)
+        self.assertIn(f"v{VERSION}", rendered.splitlines()[0])
         self.assertNotIn("}}}", rendered)
 
     def test_unknown_cli_zone_is_rejected(self):

@@ -1,7 +1,11 @@
 #!/usr/bin/env python3
 """
 RTI AD-series <-> MQTT bridge
-Version 1.9.0-beta.3 (2026-09-17)
+Version 2.0.0 (2026-09-18)
+
+- RELEASE (v2.0.0): Promote the field-tested YAML configuration, deployment,
+  generated Home Assistant speaker layer, guarded restoration, tone pacing,
+  and immediate power-on sequencing from the 1.9 beta series.
 
 - BETA (v1.9.0-beta.3): Add optional generated Home Assistant speaker
   entities for native media cards and Alexa volume intents. Legacy discovery
@@ -48,6 +52,7 @@ from pathlib import Path
 from typing import Optional, Tuple
 import paho.mqtt.client as mqtt
 from config import ConfigError, load_config
+from version import VERSION
 # --- INSTRUMENTATION ---
 import psutil # REQUIRED FOR METRICS
 # --- INSTRUMENTATION ---
@@ -55,7 +60,6 @@ import psutil # REQUIRED FOR METRICS
 # ─────────────────────────────────────────────────────────────────────────────
 # LOGGING
 # ─────────────────────────────────────────────────────────────────────────────
-VERSION = "1.9.0-beta.3"
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
 logging.basicConfig(
     level=getattr(logging, LOG_LEVEL, logging.INFO),

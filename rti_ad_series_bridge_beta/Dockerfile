@@ -1,8 +1,8 @@
 FROM ghcr.io/home-assistant/base:latest
 
-ARG BUILD_VERSION=1.9.0-beta.3
+ARG BUILD_VERSION=2.0.0
 ARG BUILD_ARCH
-ARG RTI_REF=beta-v1.9.0-beta.3
+ARG RTI_REF=v2.0.0
 
 LABEL io.hass.version="${BUILD_VERSION}" \
       io.hass.type="app" \
@@ -16,7 +16,9 @@ RUN apk add --no-cache python3 py3-pip py3-virtualenv curl && \
     curl -fsSL "https://raw.githubusercontent.com/srhunt-cyber/RTI-AD8x-Home-Assistant-bridge/${RTI_REF}/bridge/rti_ad8x_bridge.py" \
       -o /opt/rti/bridge/rti_ad8x_bridge.py && \
     curl -fsSL "https://raw.githubusercontent.com/srhunt-cyber/RTI-AD8x-Home-Assistant-bridge/${RTI_REF}/bridge/config.py" \
-      -o /opt/rti/bridge/config.py
+      -o /opt/rti/bridge/config.py && \
+    curl -fsSL "https://raw.githubusercontent.com/srhunt-cyber/RTI-AD8x-Home-Assistant-bridge/${RTI_REF}/bridge/version.py" \
+      -o /opt/rti/bridge/version.py
 
 COPY config.example.yaml /usr/share/rti/config.example.yaml
 COPY run.sh /run.sh
