@@ -6,6 +6,9 @@ Version 1.9.0-beta.3 (2026-09-17)
 - BETA (v1.9.0-beta.3): Add optional generated Home Assistant speaker
   entities for native media cards and Alexa volume intents. Legacy discovery
   remains the default; dual mode preserves every existing dashboard entity.
+- LIVE TEST (v1.9.0-beta.3): Tone commands now coalesce to one absolute target,
+  settle for six configurable seconds, and verify once without retransmitting.
+  Rapid +/- presses accumulate from the pending target; odd values are rejected.
 
 - BETA (v1.9.0-beta.2): Add opt-in, guarded amplifier-default
   restoration with YAML targets, per-zone overrides, dry-run/manual testing,
@@ -90,6 +93,7 @@ NETWORK_FAILURE_THRESHOLD = int(os.getenv("NETWORK_FAILURE_THRESHOLD", "3"))
 
 VOL_COALESCE_SEC        = float(os.getenv("VOL_COALESCE_SEC", "1.2"))
 VOL_ECHO_SUPPRESS_SEC   = float(os.getenv("VOL_ECHO_SUPPRESS_SEC", "1.00"))
+TONE_SETTLE_SEC         = float(os.getenv("TONE_SETTLE_SEC", "6.0"))
 
 # --- INSTRUMENTATION ---
 HEALTH_CHECK_INTERVAL = 30.0 # Interval for sending metrics and heartbeat
@@ -107,7 +111,7 @@ def configure_runtime(config: dict):
     global POLL_INTERVAL_SEC, CONNECT_TIMEOUT, PER_CMD_TIMEOUT, POST_SEND_SETTLE
     global INTER_CMD_SLEEP, SET_RETRIES, RETRY_SLEEP, DUMP_RAW_CHUNKS
     global RECONNECT_BACKOFF_INITIAL, NETWORK_FAILURE_THRESHOLD
-    global VOL_COALESCE_SEC, VOL_ECHO_SUPPRESS_SEC, HEALTH_CHECK_INTERVAL
+    global VOL_COALESCE_SEC, VOL_ECHO_SUPPRESS_SEC, TONE_SETTLE_SEC, HEALTH_CHECK_INTERVAL
     global HA_DISCOVERY, USE_SOURCE_NAMES, ENTITY_MODE, POWER_ON_FALLBACK_VOLUME
     global RESTORATION_CONFIG
 
@@ -136,6 +140,7 @@ def configure_runtime(config: dict):
     RETRY_SLEEP = float(os.getenv("RETRY_SLEEP", str(command_cfg["retry_delay"])))
     VOL_COALESCE_SEC = float(os.getenv("VOL_COALESCE_SEC", str(command_cfg["coalesce_window"])))
     VOL_ECHO_SUPPRESS_SEC = float(os.getenv("VOL_ECHO_SUPPRESS_SEC", str(command_cfg["echo_suppress"])))
+    TONE_SETTLE_SEC = float(os.getenv("TONE_SETTLE_SEC", str(command_cfg["tone_settle_delay"])))
     POWER_ON_FALLBACK_VOLUME = int(command_cfg["power_on_fallback_volume"])
     HEALTH_CHECK_INTERVAL = float(bridge_cfg["health_check_interval"])
     HA_DISCOVERY = ha_cfg["discovery"]
@@ -237,7 +242,8 @@ def parse_tone(line: str):
 
 def _encode_tone(level: int) -> str:
     lvl = max(-12, min(12, int(level)))
-    if lvl % 2 != 0: lvl = lvl - 1 if lvl > 0 else lvl + 1
+    if lvl % 2 != 0:
+        raise ValueError("tone level must be an even value from -12 through 12")
     return f"{lvl:02d}" if lvl >= 0 else f"{abs(lvl) + 20:02d}"
 
 def slugify(s: str) -> str: return "".join(ch.lower() if ch.isalnum() else "_" for ch in s).strip("_")
@@ -398,6 +404,21 @@ class AmpSession(threading.Thread):
             self.mqttc.publish(self._topic("zone", zone, "volume"), str(v), retain=True)
             buf["last_published_vol"] = v
 
+    def _pub_tone_only(self, zone: int, tone_data: dict):
+        """Publish confirmed tone without changing cached power/source/volume."""
+        base = self._topic("zone", zone)
+        self.mqttc.publish(f"{base}/bass", str(tone_data["bass"]), retain=True)
+        self.mqttc.publish(f"{base}/treble", str(tone_data["treble"]), retain=True)
+        buf = self._zone_states.setdefault(zone, {})
+        buf.update(tone_data)
+        required = {"zone", "power", "mute", "source", "vol_0_75", "bass", "treble"}
+        if required.issubset(buf):
+            combined = {
+                key: buf[key]
+                for key in ("zone", "power", "mute", "source", "vol_0_75", "bass", "treble")
+            }
+            self.mqttc.publish(base, json.dumps(combined, separators=(",", ":")), retain=True)
+
     def _is_zone_on(self, zone: int) -> bool:
         return self._zone_states.get(zone, {}).get("power", False)
 
@@ -526,7 +547,12 @@ class AmpSession(threading.Thread):
                 log.warning("[%s] Restore %s send failed for zone %s (%s/%s): %s",
                             self.amp_name, label, zone, attempt, attempts, exc)
                 self._close()
-            if self.stop_flag.wait(delay):
+            settle_delay = (
+                max(delay, TONE_SETTLE_SEC)
+                if ("BAS" in command or "TRB" in command)
+                else delay
+            )
+            if self.stop_flag.wait(settle_delay):
                 return False
             state = self._query_zone_locked(zone)
             if state and predicate(state):
@@ -543,14 +569,14 @@ class AmpSession(threading.Thread):
         raw_volume = protocol_volume(display_level)
         steps = [
             (
+                f"*ZN{zz(zone)}VOL75",
+                lambda state: state.get("power") and state.get("vol_0_75") == 75,
+                "silent power on",
+            ),
+            (
                 f"*ZN{zz(zone)}SRC{zz(settings['safe_source'])}",
                 lambda state: state.get("source") == settings["safe_source"],
                 f"safe source {settings['safe_source']}",
-            ),
-            (
-                f"*ZN{zz(zone)}VOL{zz(raw_volume)}",
-                lambda state: state.get("power") and state.get("vol_0_75") == raw_volume,
-                f"volume {display_level}",
             ),
             (
                 f"*ZN{zz(zone)}BAS{_encode_tone(settings['bass'])}",
@@ -561,6 +587,11 @@ class AmpSession(threading.Thread):
                 f"*ZN{zz(zone)}TRB{_encode_tone(settings['treble'])}",
                 lambda state: state.get("treble") == settings["treble"],
                 f"treble {settings['treble']}",
+            ),
+            (
+                f"*ZN{zz(zone)}VOL{zz(raw_volume)}",
+                lambda state: state.get("power") and state.get("vol_0_75") == raw_volume,
+                f"volume {display_level}",
             ),
             (
                 f"*ZN{zz(zone)}SRC{zz(settings['ready_source'])}",
@@ -660,22 +691,26 @@ class AmpSession(threading.Thread):
 
     def bass_up(self, zone: int) -> bool:
         if not self._is_zone_on(zone): return False
-        cur = self._zone_states.get(zone, {}).get("bass", 0)
+        buf = self._zone_states.get(zone, {})
+        cur = buf.get("target_bass", buf.get("bass", 0))
         return self.set_bass(zone, min(12, cur + 2))
 
     def bass_down(self, zone: int) -> bool:
         if not self._is_zone_on(zone): return False
-        cur = self._zone_states.get(zone, {}).get("bass", 0)
+        buf = self._zone_states.get(zone, {})
+        cur = buf.get("target_bass", buf.get("bass", 0))
         return self.set_bass(zone, max(-12, cur - 2))
 
     def treble_up(self, zone: int) -> bool:
         if not self._is_zone_on(zone): return False
-        cur = self._zone_states.get(zone, {}).get("treble", 0)
+        buf = self._zone_states.get(zone, {})
+        cur = buf.get("target_treble", buf.get("treble", 0))
         return self.set_treble(zone, min(12, cur + 2))
 
     def treble_down(self, zone: int) -> bool:
         if not self._is_zone_on(zone): return False
-        cur = self._zone_states.get(zone, {}).get("treble", 0)
+        buf = self._zone_states.get(zone, {})
+        cur = buf.get("target_treble", buf.get("treble", 0))
         return self.set_treble(zone, max(-12, cur - 2))
 
     # --- BATCHING / COALESCING FUNCTIONS ---
@@ -707,6 +742,9 @@ class AmpSession(threading.Thread):
         if not self._is_zone_on(zone): log.warning(f"[{self.amp_name}] Ignoring bass change for zone {zone}; power is off."); return False
         
         level_clamped = max(-12, min(12, int(level)))
+        if level_clamped % 2:
+            log.warning(f"[{self.amp_name}] Rejecting odd bass value {level}; use an even value from -12 through 12.")
+            return False
         buf = self._zone_states.setdefault(zone, {}); buf["target_bass"] = level_clamped
         t = buf.get("bass_timer") 
         if t and t.is_alive(): t.cancel()
@@ -715,22 +753,15 @@ class AmpSession(threading.Thread):
         return True
 
     def _flush_bass(self, zone: int):
-        if not self._is_zone_on(zone): return # Check again in case zone was turned off
-        buf = self._zone_states.get(zone, {}); target = buf.get("target_bass")
-        if target is None: return
-        
-        cmd = f"*ZN{zz(zone)}BAS{_encode_tone(target)}"
-        log.info(f"[{self.amp_name}] Coalesced BASS zone {zz(zone)} -> {target}")
-        
-        ok = self._send_and_confirm(zone, cmd)
-        if not ok:
-            log.warning(f"[{self.amp_name}] Coalesced bass SET failed. Re-querying.")
-            self._send_and_confirm(zone, f"*ZN{zz(zone)}STA00")
+        self._flush_tone(zone, "bass", "BAS")
 
     def set_treble(self, zone: int, level: int) -> bool:
         if not self._is_zone_on(zone): log.warning(f"[{self.amp_name}] Ignoring treble change for zone {zone}; power is off."); return False
         
         level_clamped = max(-12, min(12, int(level)))
+        if level_clamped % 2:
+            log.warning(f"[{self.amp_name}] Rejecting odd treble value {level}; use an even value from -12 through 12.")
+            return False
         buf = self._zone_states.setdefault(zone, {}); buf["target_treble"] = level_clamped
         t = buf.get("treble_timer") 
         if t and t.is_alive(): t.cancel()
@@ -739,17 +770,51 @@ class AmpSession(threading.Thread):
         return True
 
     def _flush_treble(self, zone: int):
-        if not self._is_zone_on(zone): return # Check again in case zone was turned off
-        buf = self._zone_states.get(zone, {}); target = buf.get("target_treble")
-        if target is None: return
-        
-        cmd = f"*ZN{zz(zone)}TRB{_encode_tone(target)}"
-        log.info(f"[{self.amp_name}] Coalesced TREBLE zone {zz(zone)} -> {target}")
-        
-        ok = self._send_and_confirm(zone, cmd)
-        if not ok:
-            log.warning(f"[{self.amp_name}] Coalesced treble SET failed. Re-querying.")
-            self._send_and_confirm(zone, f"*ZN{zz(zone)}STA00")
+        self._flush_tone(zone, "treble", "TRB")
+
+    def _flush_tone(self, zone: int, field: str, opcode: str):
+        """Send the latest absolute tone target once, settle, then query once."""
+        target_key = f"target_{field}"
+        with self.lock:
+            if not self.connected and not self._connect():
+                return
+            buf = self._zone_states.get(zone, {})
+            if not buf.get("power", False):
+                return
+            target = buf.get(target_key)
+            if target is None:
+                return
+            cmd = f"*ZN{zz(zone)}{opcode}{_encode_tone(target)}"
+            log.info(f"[{self.amp_name}] Coalesced {field.upper()} zone {zz(zone)} -> {target}")
+            try:
+                self._send_ascii(cmd)
+                if self.stop_flag.wait(TONE_SETTLE_SEC):
+                    return
+                self._send_ascii(f"*ZN{zz(zone)}SET00")
+                time.sleep(POST_SEND_SETTLE)
+                tone_data = parse_tone(
+                    self._read_reply(f"${zz(zone)},", PER_CMD_TIMEOUT)
+                )
+                if tone_data:
+                    self._pub_tone_only(zone, tone_data)
+                if not tone_data or tone_data.get(field) != target:
+                    actual = None if not tone_data else tone_data.get(field)
+                    log.warning(
+                        f"[{self.amp_name}] {field} target {target} not confirmed "
+                        f"for zone {zone}; actual={actual}"
+                    )
+                else:
+                    log.info(
+                        f"[{self.amp_name}] Confirmed {field} zone {zz(zone)} -> {target}"
+                    )
+            except Exception as exc:
+                log.error(f"[{self.amp_name}] {field} command error: {exc}")
+                self._close()
+            finally:
+                # A newer GUI target may have arrived during the settle delay.
+                # Keep that target for the already-scheduled follow-up timer.
+                if buf.get(target_key) == target:
+                    buf.pop(target_key, None)
 
     # --- END BATCHING ---
 
