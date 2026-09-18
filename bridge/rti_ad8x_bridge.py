@@ -716,8 +716,16 @@ class AmpSession(threading.Thread):
     # --- BATCHING / COALESCING FUNCTIONS ---
 
     def set_volume(self, zone: int, v: int) -> bool:
-        # NOTE: This is our "power on" command, so it does NOT have a power check.
         v_clamped = max(0, min(75, int(v)))
+        # The first volume command is also the RTI power-on operation. Execute
+        # it synchronously so a following source/tone command cannot overtake
+        # the queued power-on while a poll owns the amplifier lock.
+        if not self._is_zone_on(zone):
+            log.info(
+                f"[{self.amp_name}] Immediate VOL power-on zone {zz(zone)} -> {v_clamped}"
+            )
+            return self._send_and_confirm(zone, f"*ZN{zz(zone)}VOL{zz(v_clamped)}")
+
         buf = self._zone_states.setdefault(zone, {}); buf["target_vol"] = v_clamped
         t = buf.get("vol_timer")
         if t and t.is_alive(): t.cancel()
@@ -726,7 +734,6 @@ class AmpSession(threading.Thread):
         return True
 
     def _flush_volume(self, zone: int):
-        # NOTE: This is our "power on" command, so it does NOT have a power check.
         buf = self._zone_states.get(zone, {}); target = buf.get("target_vol")
         if target is None: return
         cmd = f"*ZN{zz(zone)}VOL{zz(target)}"
