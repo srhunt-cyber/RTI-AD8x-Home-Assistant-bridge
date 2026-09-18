@@ -359,6 +359,8 @@ def normalize_config(raw: dict[str, Any]) -> dict[str, Any]:
             "retry_delay": _as_float(commands.get("retry_delay", 0.2), "commands.retry_delay", 0),
             "coalesce_window": _as_float(commands.get("coalesce_window", 1.2),
                                          "commands.coalesce_window", 0),
+            "tone_settle_delay": _as_float(commands.get("tone_settle_delay", 6.0),
+                                             "commands.tone_settle_delay", 0),
             "echo_suppress": _as_float(commands.get("echo_suppress", 1.0),
                                        "commands.echo_suppress", 0),
             "power_on_fallback_volume": _as_int(commands.get("power_on_fallback_volume", 65),
