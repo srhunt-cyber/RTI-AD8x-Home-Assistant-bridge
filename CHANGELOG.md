@@ -9,6 +9,8 @@
   tone values instead of silently rounding them.
 - Make restoration power on silently before selecting the calibration source,
   and apply the tone-specific settle delay during verified restoration.
+- Execute the first volume/power-on command synchronously so an immediate
+  source selection cannot overtake a queued power-on behind a full poll.
 - Add an opt-in Home Assistant media-player package generator for native media
   cards and Alexa speaker-volume intents.
 - Add `legacy`, `dual`, and `media_player` entity modes. `legacy` remains the
