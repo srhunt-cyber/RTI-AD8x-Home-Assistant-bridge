@@ -18,6 +18,12 @@ and reconnect behavior. Its changes are focused on configuration and packaging:
   Alexa's native volume vocabulary;
 - opt-in, verified restoration of volume, bass, treble, and source defaults.
 
+Live testing confirmed that AD-series bass/treble changes are absolute but the
+tone DSP is much slower than power, source, mute, and volume. Rapid GUI changes
+are coalesced to the final even-numbered target, then the bridge waits
+`commands.tone_settle_delay` (six seconds by default) and verifies once. It does
+not resend the tone command during that settle window.
+
 The speaker layer is deliberately generated as a separate Home Assistant
 package. It does not add another Telnet client or alter RTI command pacing.
 
