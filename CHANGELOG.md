@@ -2,6 +2,13 @@
 
 ## 1.9.0-beta.3 — 2026-09-17
 
+- Live-test update: coalesce rapid bass/treble GUI input into one absolute
+  target, wait a configurable six seconds for the AD-series tone DSP, and
+  verify once without resending the tone command.
+- Accumulate rapid tone up/down presses from the pending target and reject odd
+  tone values instead of silently rounding them.
+- Make restoration power on silently before selecting the calibration source,
+  and apply the tone-specific settle delay during verified restoration.
 - Add an opt-in Home Assistant media-player package generator for native media
   cards and Alexa speaker-volume intents.
 - Add `legacy`, `dual`, and `media_player` entity modes. `legacy` remains the
