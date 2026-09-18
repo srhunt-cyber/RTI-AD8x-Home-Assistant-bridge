@@ -107,10 +107,11 @@ class RestorationTests(unittest.TestCase):
         self.assertEqual(
             [command for _, command, _ in commands],
             [
+                "*ZN01VOL75",
                 "*ZN01SRC08",
-                "*ZN01VOL55",
                 "*ZN01BAS08",
                 "*ZN01TRB12",
+                "*ZN01VOL55",
                 "*ZN01SRC01",
                 "*ZN01PWR00",
             ],
