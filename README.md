@@ -202,6 +202,10 @@ sudo /opt/rti-ad8x-bridge/.venv/bin/python \
   --output /tmp/rti_ad8x_media_players.yaml
 ```
 
+The generator also writes `/tmp/rti_ad8x_alexa_cloud.yaml`. That second file
+contains only Alexa `MUSIC_SYSTEM` category metadata for the generated zones;
+it does not expose, filter, or rename any entity.
+
 Copy the resulting file to:
 
 ```text
@@ -224,8 +228,11 @@ names, the MQTT base topic, or media-player volume limits.
 
 The generated `media_player` entities are the supported and recommended Alexa
 path in 2.0. Alexa recognizes them as speakers and can use speaker-oriented
-power, mute, and volume intents. The older template-light workaround exposed
-volume as brightness and was unreliable for voice volume commands.
+power, mute, volume, and input-selection intents. Numeric RTI sources are
+presented to Home Assistant and Alexa as `INPUT 1` through `INPUT 8`; the
+package translates selections back to the amplifier's numeric MQTT protocol.
+The older template-light workaround exposed volume as brightness and was
+unreliable for voice volume commands.
 
 With Home Assistant Cloud/Nabu Casa:
 
@@ -234,6 +241,20 @@ With Home Assistant Cloud/Nabu Casa:
 3. Do not expose the package's diagnostic helper sensors.
 4. Unexpose any old template-light speaker entities with the same names.
 5. Remove stale duplicate devices in Alexa if necessary, then run discovery.
+
+For reliable input-selection voice commands, merge the generated
+`rti_ad8x_alexa_cloud.yaml` into your Home Assistant Cloud configuration. If
+`configuration.yaml` contains `cloud: !include cloud.yaml`, copy its `alexa:`
+section into that included file. If Cloud is configured directly, nest the
+generated content beneath `cloud:`. Users who otherwise auto-expose entities
+can omit a `filter:` section; the generated snippet changes only the RTI
+speakers' Alexa category.
+
+Example voice command:
+
+```text
+Alexa, change Kitchen Speakers input to Input 2.
+```
 
 Amazon/Nabu Casa synchronization can take several minutes. Existing dashboards
 may continue using their switch/number/select entities indefinitely in `dual`

@@ -97,6 +97,9 @@ to introduce the speaker layer:
      --zone amp1:1
    ```
 
+   The same command also creates `/tmp/rti_ad8x_alexa_cloud.yaml` for the
+   selected zone. It contains only Alexa device-category metadata.
+
    When running from a Git checkout rather than `/opt`, use that checkout's
    `.venv/bin/python` and `scripts` directory.
 3. Copy the generated file to
@@ -117,16 +120,31 @@ to introduce the speaker layer:
    player. Unexpose the old template light for the same zone before asking
    Alexa to discover devices, otherwise Alexa may retain two identically named
    devices.
-7. Test these phrases:
+7. Merge the generated Alexa snippet into your Cloud configuration. For an
+   included Cloud file:
+
+   ```yaml
+   # configuration.yaml
+   cloud: !include cloud.yaml
+   ```
+
+   Merge the generated top-level `alexa:` section into `cloud.yaml`. When
+   configuring Cloud directly in `configuration.yaml`, place that generated
+   content beneath `cloud:` instead. Do not copy a second `cloud:` or `alexa:`
+   key. The snippet does not add exposure filters or rename entities, so users
+   who auto-expose everything retain that behavior.
+8. Test these phrases:
 
    - “Alexa, turn on Kitchen Speakers.”
    - “Alexa, set Kitchen Speakers volume to 30 percent.”
    - “Alexa, lower Kitchen Speakers volume.”
    - “Alexa, mute Kitchen Speakers.”
+   - “Alexa, change Kitchen Speakers input to Input 2.”
 
-8. After the one-zone test succeeds, regenerate without `--zone` to include
+9. After the one-zone test succeeds, regenerate without `--zone` to include
    every zone selected by `media_players.include`. Replace the package, check
-   configuration, and restart Home Assistant.
+   configuration, merge the regenerated Alexa snippet, and restart Home
+   Assistant.
 
 The generated MQTT/template helper entities are marked or named as internal
 diagnostic entities. Do not expose them to Alexa. Expose only the resulting

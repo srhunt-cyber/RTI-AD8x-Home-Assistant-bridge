@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.0.1 — 2026-09-19
+
+- Present numeric RTI sources as Alexa-compatible `INPUT 1` through `INPUT 8`
+  labels while translating selections back to numeric MQTT payloads.
+- Correctly translate configured friendly source names in both directions.
+- Generate a separate minimal Home Assistant Cloud Alexa snippet that marks
+  each generated speaker as `MUSIC_SYSTEM` without filtering, exposing, or
+  renaming unrelated entities.
+
 ## 2.0.0 — 2026-09-18
 
 - Promote the complete 1.9 beta series to the current production release after

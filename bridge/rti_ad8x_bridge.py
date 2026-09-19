@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """
 RTI AD-series <-> MQTT bridge
-Version 2.0.0 (2026-09-18)
+Version 2.0.1 (2026-09-19)
 
+- FIX (v2.0.1): Generate Alexa-compatible input labels, reverse source
+  translation, and a minimal MUSIC_SYSTEM Home Assistant Cloud snippet.
 - RELEASE (v2.0.0): Promote the field-tested YAML configuration, deployment,
   generated Home Assistant speaker layer, guarded restoration, tone pacing,
   and immediate power-on sequencing from the 1.9 beta series.

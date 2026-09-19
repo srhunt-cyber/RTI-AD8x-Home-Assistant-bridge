@@ -2,7 +2,7 @@ services:
   rti-bridge:
     build:
       context: .
-    image: rti-ad-series-bridge:2.0.0
+    image: rti-ad-series-bridge:2.0.1
     restart: unless-stopped
     network_mode: host
     environment:

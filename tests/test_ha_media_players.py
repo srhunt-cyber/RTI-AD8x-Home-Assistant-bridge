@@ -9,7 +9,12 @@ sys.path.insert(0, str(REPO_ROOT / "bridge"))
 sys.path.insert(0, str(REPO_ROOT / "scripts"))
 
 from config import ConfigError, normalize_config  # noqa: E402
-from generate_ha_media_players import build_package, render_package  # noqa: E402
+from generate_ha_media_players import (  # noqa: E402
+    build_alexa_cloud_config,
+    build_package,
+    render_alexa_cloud_snippet,
+    render_package,
+)
 from version import VERSION  # noqa: E402
 
 
@@ -62,6 +67,31 @@ class MediaPlayerPackageTests(unittest.TestCase):
         options = helper["attributes"]["options"]
         self.assertIn('"Sonos 1"', options)
         self.assertIn('"Sonos 2"', options)
+        self.assertIn('"1": "Sonos 1"', helper["state"])
+        payload = package["media_player"][0]["commands"]["select_source"]["data"]["payload"]
+        self.assertIn('"Sonos 1": "1"', payload)
+
+    def test_numeric_sources_use_alexa_input_labels_and_publish_numbers(self):
+        config = media_config()
+        config["home_assistant"]["use_source_names"] = False
+        package = build_package(config, ["amp1:1"])
+        helper = package["template"][0]["sensor"][0]
+        self.assertIn('"INPUT 1"', helper["attributes"]["options"])
+        self.assertIn('"1": "INPUT 1"', helper["state"])
+        payload = package["media_player"][0]["commands"]["select_source"]["data"]["payload"]
+        self.assertIn('"INPUT 1": "1"', payload)
+        self.assertIn("replace('INPUT ', '')", payload)
+
+    def test_alexa_cloud_snippet_has_music_system_without_filters_or_names(self):
+        cloud = build_alexa_cloud_config(media_config(), ["amp1:1"])
+        self.assertEqual(
+            cloud["alexa"]["entity_config"]["media_player.kitchen_speakers"],
+            {"display_categories": "MUSIC_SYSTEM"},
+        )
+        self.assertNotIn("filter", cloud["alexa"])
+        self.assertNotIn("name", cloud["alexa"]["entity_config"]["media_player.kitchen_speakers"])
+        rendered = render_alexa_cloud_snippet(media_config(), ["amp1:1"])
+        self.assertEqual(yaml.safe_load(rendered), cloud)
 
     def test_rendered_package_is_valid_yaml(self):
         rendered = render_package(media_config(), ["amp1:1"])
